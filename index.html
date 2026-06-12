@@ -1,0 +1,2629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Aqua_hub</title>
+  <meta name="description" content="Aqua_hub — a corner of the internet, in schematic." />
+  <meta name="color-scheme" content="light" />
+  <link rel="icon" type="image/png" href="Images/IconV2.png" />
+  <link rel="apple-touch-icon" href="Images/IconV2.png" />
+
+  <style>
+    /* =========================================================
+       Tokens
+       ========================================================= */
+    :root {
+      --bg:         #f6f6f3;
+      --bg-2:       #ebebe6;
+      --ink:        #0a0a0e;
+      --ink-2:      #20202a;
+      --ink-dim:    #6c6c72;
+      --ink-faint:  #b5b5b8;
+      --blue:       #1f31ff;
+      --blue-2:     #0e1ad0;
+      --rule:       rgba(10, 10, 14, 0.85);
+      --rule-soft:  rgba(10, 10, 14, 0.18);
+      --grid-line:  rgba(10, 10, 14, 0.20);
+
+      /* Semi-transparent fills so the rain visibly drips through the
+         panels (the "integration with the background of objects" idea).
+         Tunable — higher alpha = more contrast, less rain visible. */
+      --panel-bg:   rgba(246, 246, 243, 0.78);
+      --panel-bg-2: rgba(246, 246, 243, 0.62);
+
+      --rain-color: 70, 70, 76;
+
+      --sans: "Helvetica Neue", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      --mono: ui-monospace, "JetBrains Mono", "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+
+      --pad:  clamp(20px, 3.6vw, 56px);
+      --maxw: 1480px;
+      --ease: cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    /* =========================================================
+       Reset
+       ========================================================= */
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--sans);
+      font-size: clamp(14px, 1vw, 16px);
+      line-height: 1.45;
+      letter-spacing: -0.005em;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+      overflow-x: hidden;
+      min-height: 100vh;
+      font-feature-settings: "ss01", "tnum";
+      position: relative;
+    }
+    a { color: inherit; text-decoration: none; }
+    img, svg { display: block; max-width: 100%; height: auto; }
+    ::selection { background: var(--blue); color: #fff; }
+
+    /* =========================================================
+       BACKGROUND LAYERS — single WebGL gradient canvas
+       =========================================================
+       Replaces the v11 warped grid + falling-rain combo with one
+       fragment-shader-driven mesh gradient. The shader paints a
+       slowly drifting blend of cobalt / peach / lavender / bone
+       across the whole viewport. The cursor's velocity is fed in
+       as a uniform that offsets the sample UVs — so when you move
+       the cursor the gradient drags along with it (same velocity-
+       displacement model as the hero title, just GPU-native).
+       Single canvas, single rAF, single shader pass. Cheap. */
+    #bg-shader {
+      position: fixed; inset: 0;
+      z-index: 0; pointer-events: none;
+      display: block;
+    }
+
+    /* =========================================================
+       Registration marks (corners)
+       ========================================================= */
+    .reg {
+      position: fixed;
+      width: 28px; height: 28px;
+      z-index: 6;
+      color: var(--ink);
+      pointer-events: none;
+    }
+    .reg svg { width: 100%; height: 100%; }
+    .reg-tl { top: 12px; left: 12px; }
+    .reg-tr { top: 12px; right: 12px; }
+    .reg-bl { bottom: 12px; left: 12px; }
+    .reg-br { bottom: 12px; right: 12px; }
+
+    /* =========================================================
+       Top ticker — codes scrolling. Pure CSS transform keyframe.
+       ========================================================= */
+    .ticker {
+      position: relative; z-index: 3;
+      border-top: 1px solid var(--ink);
+      border-bottom: 1px solid var(--ink);
+      overflow: hidden;
+      background: var(--ink);
+      color: #fff;
+      padding: 6px 0;
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+    }
+    .ticker-track {
+      display: flex; gap: 0;
+      width: max-content;
+      animation: tick 60s linear infinite;
+      will-change: transform;
+    }
+    .ticker-track span { padding: 0 1.6em; white-space: nowrap; }
+    .ticker-track span .b { color: #6c8dff; }
+    @keyframes tick {
+      from { transform: translateX(0); }
+      to   { transform: translateX(-50%); }
+    }
+
+    /* =========================================================
+       Top bar
+       ========================================================= */
+    .topbar {
+      position: relative; z-index: 3;
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 16px;
+      padding: 14px var(--pad);
+      background: var(--panel-bg);
+      border-bottom: 1px solid var(--ink);
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+    }
+    .topbar .lot { color: var(--blue); font-weight: 700; }
+    .topbar .center {
+      display: flex; gap: 18px; justify-content: center;
+      color: var(--ink-dim); flex-wrap: wrap;
+    }
+    .topbar .center span { display: inline-flex; gap: 6px; align-items: center; }
+    .topbar .center .dot {
+      width: 6px; height: 6px; border-radius: 50%; background: var(--blue);
+      display: inline-block;
+      animation: pulse 2.4s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+
+    /* =========================================================
+       Containers
+       ========================================================= */
+    .wrap { width: 100%; max-width: var(--maxw); margin: 0 auto; padding: 0 var(--pad); }
+    section { position: relative; z-index: 2; }
+
+    /* schematic boxes — translucent so the rain shows through */
+    .panel {
+      position: relative;
+      border: 1px solid var(--ink);
+      background: var(--panel-bg);
+    }
+    .panel-h {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 14px; align-items: center;
+      padding: 7px 12px;
+      border-bottom: 1px solid var(--ink);
+      background: var(--ink); color: #fff;
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+    }
+    .panel-h.blue { background: var(--blue); }
+    .panel-h .num { font-weight: 700; }
+    .panel-h .right { color: rgba(255,255,255,0.7); }
+
+    .chip {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-family: var(--mono);
+      font-size: 0.66rem;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--ink-dim);
+    }
+    .chip .b { color: var(--blue); font-weight: 700; }
+
+    /* fills */
+    .hatch {
+      background-image: repeating-linear-gradient(45deg,
+        var(--ink) 0 1.4px, transparent 1.4px 7px);
+      background-color: var(--panel-bg-2);
+    }
+    .hatch.blue { background-image: repeating-linear-gradient(45deg,
+        var(--blue) 0 1.4px, transparent 1.4px 7px); }
+    .barcode {
+      height: 28px;
+      background-image: repeating-linear-gradient(90deg,
+        var(--ink) 0 1px, transparent 1px 3px,
+        var(--ink) 3px 5px, transparent 5px 6px,
+        var(--ink) 6px 7px, transparent 7px 10px,
+        var(--ink) 10px 13px, transparent 13px 14px,
+        var(--ink) 14px 15px, transparent 15px 18px);
+    }
+
+    /* =========================================================
+       Hover: grow + hold (CSS only).
+       ---------------------------------------------------------
+       All .magnet elements scale up on pointer hover and HOLD at
+       the larger size until the cursor leaves. No bounce-back,
+       no JS, no tick — pure transform transition.
+       ========================================================= */
+    .magnet {
+      display: inline-block;
+      /* `width: max-content` shrinks the element to exactly its text,
+         even when its grid/flex parent would otherwise stretch it.
+         Without this, the V.15 / project-number "magnets" filled the
+         whole row and hovering anywhere over the container triggered
+         the scale. Now :hover only fires on the actual glyphs. */
+      width: max-content;
+      max-width: 100%;
+      justify-self: start;
+      align-self: flex-start;
+      transform-origin: 50% 50%;
+      transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+      will-change: transform;
+    }
+    .magnet:hover { transform: scale(1.16); }
+    /* The v.16 magnet sits flush against the left edge of its blue
+       panel — anchor the scale to its left edge so it grows rightward
+       instead of spilling out. Scoped JUST to this one element. */
+    .h-num .big.magnet { transform-origin: 0% 50%; }
+
+    /* =========================================================
+       HERO
+       ========================================================= */
+    .hero {
+      padding: clamp(28px, 4vw, 64px) 0 clamp(40px, 6vw, 80px);
+      border-bottom: 1px solid var(--ink);
+    }
+    .hero-grid {
+      display: grid;
+      /* minmax(0, 1fr) prevents an oversize title from blowing out its column
+         and pushing h-aux below it at large viewports */
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      gap: 12px;
+      align-items: stretch;
+      min-height: 70vh;
+    }
+    .h-side {
+      grid-column: span 1;
+      min-width: 0;
+      writing-mode: vertical-rl;
+      transform: rotate(180deg);
+      border-right: 1px solid var(--ink);
+      padding: 14px 8px;
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      letter-spacing: 0.32em;
+      text-transform: uppercase;
+      color: var(--ink-dim);
+      display: flex; align-items: center; justify-content: space-between;
+      background: var(--panel-bg);
+    }
+    .h-side b { color: var(--blue); font-weight: 700; }
+
+    .h-title {
+      grid-column: span 7;
+      min-width: 0;
+      overflow: hidden;
+      position: relative;
+      display: flex; flex-direction: column; justify-content: space-between;
+      padding: 16px 8px 10px;
+      gap: 28px;
+      border-right: 1px solid var(--ink);
+      background: var(--panel-bg);
+    }
+    .h-title .meta-row {
+      display: flex; justify-content: space-between; gap: 12px;
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--ink-dim);
+    }
+    .h-title .meta-row .b { color: var(--blue); font-weight: 700; }
+
+    .display {
+      font-family: var(--sans);
+      font-weight: 800;
+      /* "Aqua_hub" is shorter than the old "Aqua_syntax", so there's room
+         to scale up. Capped + vw-tuned so the glyphs + 100px canvas inset
+         still fit the 7-col hero allotment at full width, and the single-
+         column / phone breakpoints override this below. */
+      font-size: clamp(2.6rem, 9.5vw, 9.5rem);
+      line-height: 0.92;
+      letter-spacing: -0.045em;
+      color: var(--ink);
+      margin: 0;
+    }
+    .display .u { color: var(--blue); font-style: italic; font-weight: 700; }
+    .display .ghost { color: var(--ink-faint); }
+
+    /* ---- Pixel-shatter container ----
+       The h1 is kept in the DOM for layout, sizing, and screen-readers,
+       but is visually hidden once the canvas takes over. The canvas
+       overlays it exactly and the cursor pushes the text's pixels apart;
+       they spring back when the cursor leaves. */
+    .title-shatter {
+      position: relative;
+      display: inline-block;
+    }
+    .title-shatter .display { display: inline-block; }
+    .title-shatter.live .display { visibility: hidden; }
+    .shatter {
+      position: absolute;
+      /* Negative top/left + larger width/height are SET BY JS so the canvas
+         extends beyond the type. That gives the cursor a wider interactive
+         zone — pixels keep displacing even when the cursor is in the
+         margin around the letters, not directly over a glyph. */
+      pointer-events: auto;
+      opacity: 0;
+      transition: opacity 0.4s var(--ease);
+      will-change: opacity;
+    }
+    .title-shatter.live .shatter { opacity: 1; }
+
+    .h-tagline {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 22px;
+      align-items: end;
+      padding-top: 8px;
+      border-top: 1px solid var(--ink);
+    }
+    .h-tagline .lede {
+      font-family: var(--sans);
+      font-weight: 500;
+      font-size: clamp(1rem, 1.3vw, 1.2rem);
+      max-width: 44ch;
+      color: var(--ink-2);
+      padding-top: 14px;
+    }
+    .h-tagline .lede em {
+      font-style: italic; color: var(--blue);
+      font-weight: 600;
+    }
+    .h-tagline .mark {
+      font-family: var(--sans);
+      font-weight: 800;
+      font-size: clamp(2.6rem, 6vw, 5rem);
+      line-height: 1;
+      letter-spacing: -0.05em;
+      color: var(--blue);
+      padding-top: 12px;
+    }
+
+    .h-aux {
+      grid-column: span 4;
+      min-width: 0;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 10px;
+    }
+    /* Staggered entrance for the aux blocks (globe / magnitude / grid) so
+       they slide+fade in on load instead of just appearing. Transform is
+       gone by the time it settles, so it doesn't disturb the globe canvas
+       (which rides inside .h-globe anyway). */
+    @keyframes auxIn {
+      from { opacity: 0; transform: translateY(16px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .h-aux > * { animation: auxIn 0.65s var(--ease) both; }
+    .h-aux > *:nth-child(1) { animation-delay: 0.10s; }
+    .h-aux > *:nth-child(2) { animation-delay: 0.22s; }
+    .h-aux > *:nth-child(3) { animation-delay: 0.34s; }
+    .h-globe {
+      border: 1px solid var(--ink);
+      background: var(--panel-bg-2);
+      position: relative;
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden;
+      min-height: 240px;
+    }
+    .h-globe .label {
+      position: absolute; top: 8px; left: 10px;
+      font-family: var(--mono);
+      font-size: 0.62rem; letter-spacing: 0.22em;
+      text-transform: uppercase; color: var(--ink-dim);
+    }
+    .h-globe .num {
+      position: absolute; bottom: 8px; right: 10px;
+      font-family: var(--mono); font-size: 0.62rem;
+      letter-spacing: 0.22em; color: var(--ink-dim);
+    }
+    .h-globe svg {
+      width: 70%; height: 70%;
+      color: var(--ink);
+      /* rotation is now driven inside the displacement canvas
+         (see "Pixel shader on SVG objects" IIFE) */
+      will-change: transform;
+      transform-origin: 50% 50%;
+    }
+
+    .h-num {
+      border: 1px solid var(--ink);
+      background: var(--blue);
+      color: #fff;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      padding: 10px;
+      gap: 10px;
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+    }
+    .h-num .big {
+      font-family: var(--sans);
+      font-weight: 800;
+      font-size: clamp(3rem, 6vw, 5rem);
+      line-height: 1;
+      letter-spacing: -0.04em;
+      align-self: end;
+    }
+    .h-num .row { display: flex; justify-content: space-between; gap: 8px; }
+
+    .h-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 10px;
+    }
+    .h-grid .cell {
+      border: 1px solid var(--ink);
+      background: var(--panel-bg);
+      padding: 8px;
+      font-family: var(--mono);
+      font-size: 0.62rem;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--ink-2);
+      min-height: 60px;
+      display: flex; flex-direction: column; justify-content: space-between;
+    }
+    .h-grid .cell.solid { background: var(--ink); color: #fff; }
+    .h-grid .cell .b { color: var(--blue); font-weight: 700; }
+    .h-grid .cell.hatch { color: transparent; }
+    .halfs { display: flex; gap: 4px; align-items: center; }
+    .halfs .h {
+      width: 14px; height: 14px; border-radius: 50%;
+      border: 1px solid var(--ink);
+      background: linear-gradient(90deg, var(--ink) 50%, transparent 50%);
+    }
+    .halfs .h.r { transform: rotate(180deg); }
+    .halfs .h.t { transform: rotate(90deg); }
+
+    /* =========================================================
+       Sections (about / work / elsewhere)
+       ========================================================= */
+    section.about, section.work, section.elsewhere {
+      padding: clamp(40px, 6vw, 84px) 0;
+      border-bottom: 1px solid var(--ink);
+    }
+    .sec-head {
+      display: grid;
+      grid-template-columns: auto 1fr auto auto;
+      gap: 18px;
+      align-items: end;
+      margin-bottom: clamp(28px, 4vw, 56px);
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--ink);
+    }
+    .sec-head .num {
+      font-family: var(--sans);
+      font-weight: 800;
+      font-size: clamp(2.2rem, 5vw, 4rem);
+      letter-spacing: -0.04em;
+      line-height: 1;
+      color: var(--blue);
+    }
+    .sec-head .title {
+      font-family: var(--sans);
+      font-weight: 800;
+      font-size: clamp(1.8rem, 4vw, 3rem);
+      letter-spacing: -0.03em;
+      line-height: 1;
+      align-self: end;
+    }
+    .sec-head .right {
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--ink-dim);
+      text-align: right;
+    }
+
+    /* ABOUT */
+    .about-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+      gap: clamp(28px, 4vw, 64px);
+    }
+    .about-text p {
+      font-size: clamp(1.05rem, 1.3vw, 1.25rem);
+      line-height: 1.55;
+      color: var(--ink);
+      max-width: 56ch;
+    }
+    .about-text p + p { margin-top: 1em; }
+    .about-text p strong { font-weight: 700; }
+    .about-text p em { color: var(--blue); font-style: italic; font-weight: 600; }
+
+    .about-aside {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-auto-rows: auto;
+      gap: 10px;
+      align-content: start;
+    }
+    .about-aside > .panel { padding: 12px; min-height: 100px; }
+    .about-aside .panel .sm {
+      font-family: var(--mono); font-size: 0.66rem;
+      letter-spacing: 0.18em; text-transform: uppercase;
+      color: var(--ink-dim);
+    }
+    .about-aside .panel .lg {
+      font-family: var(--sans); font-weight: 800;
+      font-size: clamp(1.6rem, 3vw, 2.4rem);
+      letter-spacing: -0.03em; line-height: 1;
+      margin-top: 8px; color: var(--ink);
+    }
+    .about-aside .panel .lg.b { color: var(--blue); }
+    .about-aside .panel.full { grid-column: span 2; }
+    .about-aside .barcode-box { padding: 0; height: 60px; }
+    .about-aside .barcode-box .barcode { width: 100%; height: 100%; }
+
+    /* WORK */
+    .work-list { display: flex; flex-direction: column; gap: clamp(36px, 5vw, 72px); }
+
+    /* Platform groups inside work-list ---------------------------- */
+    .proj-group { display: flex; flex-direction: column; gap: clamp(20px, 3vw, 40px); }
+    .proj-group-head {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 16px;
+      align-items: end;
+      padding-bottom: 8px;
+      border-bottom: 1px dashed var(--rule);
+    }
+    .proj-group-head .gh-key {
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--blue);
+      align-self: end;
+      padding-bottom: 4px;
+    }
+    .proj-group-head .gh-name {
+      font-family: var(--sans);
+      font-weight: 800;
+      font-size: clamp(1.4rem, 2.8vw, 2.2rem);
+      letter-spacing: -0.03em;
+      line-height: 1;
+      text-transform: lowercase;
+    }
+    .proj-group-head .gh-meta {
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--ink-dim);
+      text-align: right;
+      padding-bottom: 4px;
+    }
+    .proj {
+      display: grid;
+      grid-template-columns: minmax(0, 130px) minmax(0, 1fr) minmax(0, 280px);
+      border: 1px solid var(--ink);
+      background: var(--panel-bg);
+      transition: transform 0.4s var(--ease);
+      text-decoration: none;
+      color: inherit;
+    }
+    /* Bounce In (Hover.css) — a springy timing function does the bounce;
+       no keyframes. Scale is dialled down from the original 1.2 since these
+       are large cards, not small buttons. Leaving the cursor uses the base
+       easing for a clean shrink-back. */
+    /* NOTE: these are qualified with .reveal so they out-specify the
+       `.reveal.in { transition: opacity ... }` rule, which would otherwise
+       clobber the transform transition (two classes vs one) and make the
+       hover snap with no bounce. */
+    a.proj.reveal {
+      transform: scale(1);
+      transition: transform 0.5s var(--ease), opacity 0.35s var(--ease);
+      will-change: transform;
+      backface-visibility: hidden;   /* GPU/antialias nudge w/o a 3D transform */
+    }
+    a.proj.reveal:hover {
+      transform: scale(1.06);
+      transition-timing-function: cubic-bezier(0.47, 2.02, 0.31, -0.36);
+    }
+    a.proj:hover .col-body .tagline .b { color: var(--blue); letter-spacing: 0.06em; }
+
+    /* Scroll-velocity pop: when a card enters view during a FAST scroll
+       (driven by JS adding .pop), it bounces up and settles back. */
+    @keyframes projScrollPop {
+      0%   { transform: scale(1); }
+      32%  { transform: scale(1.055); }
+      55%  { transform: scale(0.992); }
+      74%  { transform: scale(1.022); }
+      100% { transform: scale(1); }
+    }
+    a.proj.pop { animation: projScrollPop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+    /* (Underline on the project number removed — grow only.) */
+
+    .proj .col-num {
+      border-right: 1px solid var(--ink);
+      background: var(--blue);
+      color: #fff;
+      padding: 16px 14px;
+      display: flex; flex-direction: column; justify-content: space-between;
+      gap: 12px;
+      min-height: 200px;
+    }
+    .proj .col-num .num {
+      font-family: var(--sans);
+      font-weight: 800;
+      font-size: clamp(3rem, 6vw, 5rem);
+      letter-spacing: -0.05em; line-height: 1;
+    }
+    .proj .col-num .meta {
+      font-family: var(--mono);
+      font-size: 0.66rem;
+      letter-spacing: 0.18em; text-transform: uppercase;
+      color: rgba(255,255,255,0.85);
+    }
+    .proj .col-num .meta b { color: #fff; font-weight: 700; }
+
+    .proj .col-body {
+      padding: 16px 18px 18px;
+      border-right: 1px solid var(--ink);
+      display: flex; flex-direction: column;
+      gap: 14px;
+    }
+    .proj .col-body .header {
+      display: flex; justify-content: space-between; gap: 12px;
+      font-family: var(--mono);
+      font-size: 0.66rem;
+      letter-spacing: 0.18em; text-transform: uppercase;
+      color: var(--ink-dim);
+    }
+    .proj .col-body .title {
+      font-family: var(--sans);
+      font-weight: 800;
+      font-size: clamp(1.6rem, 3.4vw, 2.6rem);
+      letter-spacing: -0.03em; line-height: 1.02;
+      color: var(--ink);
+    }
+    .proj .col-body .title em {
+      color: var(--blue); font-style: italic;
+      font-weight: 700;
+    }
+    .proj .col-body .desc { font-size: 0.95rem; max-width: 56ch; color: var(--ink-2); }
+    .proj .col-body .tagline {
+      margin-top: auto;
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      letter-spacing: 0.22em; text-transform: uppercase;
+      color: var(--ink-dim);
+      border-top: 1px solid var(--rule-soft);
+      padding-top: 10px;
+      display: flex; justify-content: space-between; gap: 12px;
+    }
+    .proj .col-body .tagline b { color: var(--blue); font-weight: 700; }
+
+    .proj .col-deco {
+      padding: 14px;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 10px;
+      min-height: 200px;
+    }
+    .proj .col-deco .top {
+      display: flex; justify-content: space-between;
+      font-family: var(--mono);
+      font-size: 0.62rem; letter-spacing: 0.18em;
+      text-transform: uppercase; color: var(--ink-dim);
+    }
+    .proj .col-deco .mid {
+      border: 1px solid var(--ink);
+      background: var(--panel-bg-2);
+      display: flex; align-items: center; justify-content: center;
+      color: var(--ink);
+    }
+    .proj .col-deco .mid svg { width: 76%; height: 76%; }
+    .proj .col-deco .bottom {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+    .proj .col-deco .bottom > div { border: 1px solid var(--ink); min-height: 22px; }
+
+    /* =========================================================
+       ELSEWHERE — link rows. Classic stretch-on-hover (restored).
+       Row slides right, arrow widens, name scaleY jumps, colours
+       brighten. The v15 underline / simple grow is gone here.
+       ========================================================= */
+    .else-list { display: flex; flex-direction: column; }
+    .else-row {
+      display: grid;
+      grid-template-columns: auto 1fr auto auto;
+      gap: clamp(14px, 3vw, 32px);
+      align-items: baseline;
+      padding: 24px 0;
+      border-top: 1px solid var(--ink);
+      color: var(--ink-2);
+      transition: transform 0.45s var(--ease), color 0.3s var(--ease);
+    }
+    .else-row:last-child { border-bottom: 1px solid var(--ink); }
+    .else-row:hover { transform: translateX(16px); color: var(--ink); }
+
+    .else-row .arrow {
+      display: inline-block;
+      min-width: 1.6em;
+      color: var(--blue);
+      font-family: var(--mono);
+      transition: min-width 0.45s var(--ease), color 0.3s var(--ease), letter-spacing 0.45s var(--ease);
+    }
+    .else-row:hover .arrow { min-width: 2.6em; letter-spacing: 0.4em; }
+
+    .else-row .name {
+      font-family: var(--sans);
+      font-weight: 800;
+      font-size: clamp(1.6rem, 4vw, 2.6rem);
+      letter-spacing: -0.02em;
+      line-height: 1;
+      transform: scaleY(1.6);
+      transform-origin: left center;
+      transition: transform 0.5s var(--ease), color 0.3s var(--ease);
+    }
+    .else-row:hover .name { transform: scaleY(1.95); color: var(--ink); }
+    .else-row .name em { color: var(--blue); font-style: italic; font-weight: 700; }
+
+    .else-row .handle {
+      font-family: var(--mono);
+      font-size: 0.78rem; letter-spacing: 0.14em;
+      color: var(--ink-dim);
+      text-transform: lowercase;
+      transition: color 0.3s var(--ease);
+    }
+    .else-row:hover .handle { color: var(--ink-2); }
+
+    .else-row .label {
+      font-family: var(--mono);
+      font-size: 0.7rem; letter-spacing: 0.28em;
+      text-transform: uppercase;
+      color: var(--ink-faint);
+      transition: color 0.3s var(--ease);
+    }
+    .else-row:hover .label { color: var(--blue); }
+
+    /* Floating cursor toast (used by click-to-copy) -------------- */
+    .copy-toast {
+      position: fixed;
+      z-index: 9999;
+      pointer-events: none;
+      transform: translate(-50%, -130%);
+      padding: 6px 10px;
+      background: var(--ink);
+      color: var(--bg);
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      white-space: nowrap;
+      border: 1px solid var(--ink);
+      opacity: 0;
+      transition: opacity 0.18s var(--ease), transform 0.28s var(--ease);
+    }
+    .copy-toast.show { opacity: 1; transform: translate(-50%, -160%); }
+    .copy-toast::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      bottom: -5px;
+      width: 8px; height: 8px;
+      background: var(--ink);
+      transform: translateX(-50%) rotate(45deg);
+    }
+
+    /* =========================================================
+       FOOTER — no more "End of file" anything
+       ========================================================= */
+    footer { padding: clamp(60px, 8vw, 120px) 0 calc(var(--pad) * 2); position: relative; z-index: 2; }
+    .foot {
+      display: grid;
+      grid-template-columns: 1.4fr 1fr 1fr;
+      gap: clamp(16px, 3vw, 40px);
+      align-items: end;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--ink);
+    }
+    .foot .big {
+      font-family: var(--sans);
+      font-weight: 800;
+      font-size: clamp(1.9rem, 4.6vw, 3.6rem);
+      letter-spacing: -0.04em; line-height: 1;
+    }
+    .foot .big em {
+      font-family: var(--sans);
+      font-style: italic; font-weight: 700;
+      color: var(--blue);
+    }
+    .foot-meta {
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--ink-2);
+    }
+    .foot-meta a { color: var(--ink); border-bottom: 1px solid currentColor; cursor: pointer; }
+    .foot-meta a:hover { color: var(--blue); }
+    .foot-meta a .copy-hint {
+      border-bottom: 0;
+      font-size: 0.82em;
+      letter-spacing: 0.12em;
+      color: var(--ink-faint);
+      opacity: 0;
+      transition: opacity 0.25s var(--ease), color 0.25s var(--ease);
+    }
+    .foot-meta a:hover .copy-hint { opacity: 1; color: var(--blue); }
+    .foot-sig {
+      margin-top: 18px;
+      font-family: var(--mono);
+      font-size: 0.66rem;
+      letter-spacing: 0.24em;
+      text-transform: uppercase;
+      color: var(--ink-dim);
+      display: flex; justify-content: space-between;
+      flex-wrap: wrap; gap: 14px;
+    }
+    .foot-sig .b { color: var(--blue); font-weight: 700; }
+
+    /* =========================================================
+       Reveal — text scrambles in (handled by JS); element fades
+       opacity at the same time so the garbled initial state isn't
+       visible before the scramble starts
+       ========================================================= */
+    .reveal { opacity: 0; }
+    .reveal.in { opacity: 1; transition: opacity 0.35s var(--ease); }
+
+    /* =========================================================
+       Responsive / reduced motion
+       ========================================================= */
+    @media (max-width: 980px) {
+      .hero-grid { grid-template-columns: 1fr; min-height: auto; }
+      .h-side { grid-column: span 1; writing-mode: horizontal-tb; transform: none; border-right: 0; border-bottom: 1px solid var(--ink); padding: 8px 0; }
+      .h-title, .h-aux { grid-column: span 1; }
+      .h-title { border-right: 0; }
+      /* The title canvas draws the name stretched ~2.5x tall, but the
+         hidden <h1> only reserves line-height worth of space. On desktop a
+         tall flex hero hides the overflow; in single-column it spills onto
+         the tagline. Reserve the stretched height so it can't overlap. */
+      .display { line-height: 2.5; }
+      /* keep the globe a circle — equal width & height regardless of how
+         wide its (now full-width) container is */
+      .h-globe svg { width: min(58vw, 300px); height: min(58vw, 300px); }
+      /* the project deco shapes are pure ornament; in single-column the
+         panel would become a huge empty full-width box, so drop it */
+      .proj .col-deco { display: none; }
+      .about-grid { grid-template-columns: 1fr; }
+      .proj { grid-template-columns: 1fr; }
+      .proj .col-num, .proj .col-body { border-right: 0; border-bottom: 1px solid var(--ink); }
+      .else-row { grid-template-columns: auto 1fr auto; }
+      .else-row .label { display: none; }
+      .foot { grid-template-columns: 1fr; }
+    }
+
+    /* ---- Phone ---- */
+    @media (max-width: 600px) {
+      :root { --pad: clamp(14px, 4vw, 22px); }
+
+      /* ticker / topbar — keep on one tidy line, smaller */
+      .ticker, .topbar { font-size: 0.62rem; letter-spacing: 0.14em; }
+      .topbar { grid-template-columns: 1fr auto; gap: 10px; }
+      .topbar .center { display: none; }     /* status pills don't fit */
+
+      /* section headers — stop the 4-column squeeze, stack to 2 rows */
+      .sec-head {
+        grid-template-columns: auto 1fr;
+        gap: 8px 12px;
+        align-items: baseline;
+      }
+      .sec-head .num { font-size: clamp(2rem, 12vw, 2.8rem); }
+      .sec-head .title { font-size: clamp(1.5rem, 7vw, 2rem); }
+      .sec-head .right { grid-column: 2; text-align: left; }
+      .sec-head .chip { grid-column: 1 / -1; text-align: left; }
+
+      /* hero */
+      .hero { padding: 18px 0 28px; }
+      .h-title { padding: 14px 0 10px; }
+      .display { font-size: clamp(2.2rem, 13vw, 3.4rem); }
+      .h-tagline { grid-template-columns: 1fr; gap: 6px; }
+      .h-tagline .mark { font-size: clamp(2rem, 11vw, 3rem); padding-top: 0; }
+      .h-tagline .lede { padding-top: 6px; max-width: none; }
+      .h-globe { min-height: 200px; }
+      .h-grid { grid-template-columns: 1fr 1fr; }
+
+      /* project cards — drop the dead min-height, calm the giant number */
+      .proj .col-num {
+        min-height: 0;
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 14px;
+      }
+      .proj .col-num .num { font-size: clamp(2rem, 11vw, 3rem); }
+      .proj .col-num .meta { text-align: right; }
+      .proj .col-body { padding: 14px; }
+      .proj-group-head .gh-name { font-size: clamp(1.3rem, 8vw, 1.8rem); }
+
+      /* link rows — tighter, smaller stretch */
+      .else-row { padding: 18px 0; gap: 12px; align-items: center; }
+      .else-row .name { font-size: clamp(1.4rem, 8vw, 2rem); transform: scaleY(1.35); }
+      .else-row:hover { transform: translateX(8px); }
+      .else-row:hover .name { transform: scaleY(1.5); }
+
+      /* about */
+      .about-aside { grid-template-columns: 1fr 1fr; }
+      .about-text p { font-size: 1.05rem; }
+
+      /* footer */
+      .foot-sig { font-size: 0.6rem; letter-spacing: 0.16em; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .ticker-track, .h-globe svg, .dot, .warp-grid { animation: none !important; }
+      .reveal { opacity: 1; transform: none; transition: none; }
+      .magnet { transition: none !important; transform: none !important; }
+      a.proj:hover { transform: none !important; }
+      .h-aux > * { animation: none !important; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Background layer: a single WebGL canvas running a mesh-gradient
+       fragment shader with cursor-velocity displacement baked in. -->
+  <canvas id="bg-shader" aria-hidden="true"></canvas>
+
+  <!-- Corner registration marks -->
+  <div class="reg reg-tl" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="6"/><line x1="0" y1="12" x2="24" y2="12"/><line x1="12" y1="0" x2="12" y2="24"/></svg></div>
+  <div class="reg reg-tr" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="6"/><line x1="0" y1="12" x2="24" y2="12"/><line x1="12" y1="0" x2="12" y2="24"/></svg></div>
+  <div class="reg reg-bl" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="6"/><line x1="0" y1="12" x2="24" y2="12"/><line x1="12" y1="0" x2="12" y2="24"/></svg></div>
+  <div class="reg reg-br" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="6"/><line x1="0" y1="12" x2="24" y2="12"/><line x1="12" y1="0" x2="12" y2="24"/></svg></div>
+
+  <!-- Top bar -->
+  <div class="topbar">
+    <span class="lot">AQ&nbsp;/&nbsp;7&middot;26</span>
+    <span class="center">
+      <span><span class="dot"></span>terminal 26</span>
+      <span>aqua_hub</span>
+      <span>vol. xvi</span>
+      <span>ready-to-fly</span>
+    </span>
+    <span><a href="mailto:krilicht@gmail.com">krilicht@gmail.com</a></span>
+  </div>
+
+  <!-- Ticker -->
+  <div class="ticker" aria-hidden="true">
+    <div class="ticker-track">
+      <span>AS-26-001 <span class="b">·</span> 58°58'12"N · 5°43'59"E <span class="b">·</span> TERMINAL 5 <span class="b">·</span> READY-TO-FLY <span class="b">·</span> ULTRALIGHT <span class="b">·</span> MAGNITUDE CODE <span class="b">·</span> SUBJECT: AQUA_HUB <span class="b">·</span> SPECIFICITY: 01 <span class="b">·</span> AA7-56686 <span class="b">·</span> 7357681391 <span class="b">·</span> STAVANGER, NORWAY <span class="b">·</span> 58°58'N 5°44'E <span class="b">·</span> </span>
+      <span>AS-26-001 <span class="b">·</span> 58°58'12"N · 5°43'59"E <span class="b">·</span> TERMINAL 5 <span class="b">·</span> READY-TO-FLY <span class="b">·</span> ULTRALIGHT <span class="b">·</span> MAGNITUDE CODE <span class="b">·</span> SUBJECT: AQUA_HUB <span class="b">·</span> SPECIFICITY: 01 <span class="b">·</span> AA7-56686 <span class="b">·</span> 7357681391 <span class="b">·</span> STAVANGER, NORWAY <span class="b">·</span> 58°58'N 5°44'E <span class="b">·</span> </span>
+    </div>
+  </div>
+
+  <main>
+
+    <!-- HERO -->
+    <section class="hero">
+      <div class="wrap">
+        <div class="hero-grid">
+
+          <div class="h-side">
+            <span>aqua_hub · personal domain</span>
+            <span><b>26</b> · vol. xvi</span>
+          </div>
+
+          <div class="h-title">
+            <div class="meta-row">
+              <span><span class="b">●</span>&nbsp; ref&nbsp;/&nbsp;AS-26-001</span>
+              <span>file&nbsp;/&nbsp;v16.html</span>
+              <span>2026 — present</span>
+            </div>
+
+            <div class="title-shatter" id="shatterRoot">
+              <!-- the real text lives here for screen-readers and the
+                   initial measurement; visually it is replaced by the
+                   canvas overlay (.shatter) once the effect is wired up -->
+              <h1 class="display" id="displayName">Aqua<span class="u">_</span>hub</h1>
+              <canvas class="shatter" id="shatter" aria-hidden="true"></canvas>
+            </div>
+
+            <div class="h-tagline">
+              <span class="mark magnet" data-strength="0.45">26</span>
+              <p class="lede">
+                A small space dedicated to me. Updates every so often with
+                <em>new projects I've made</em> (:
+              </p>
+            </div>
+          </div>
+
+          <div class="h-aux">
+            <div class="h-globe">
+              <span class="label">terminal 5 / globe</span>
+              <span class="num">G07 — 36400</span>
+              <svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="0.9" aria-hidden="true">
+                <circle cx="50" cy="50" r="46"/>
+                <ellipse cx="50" cy="50" rx="46" ry="22"/>
+                <ellipse cx="50" cy="50" rx="46" ry="9"/>
+                <ellipse cx="50" cy="50" rx="22" ry="46"/>
+                <ellipse cx="50" cy="50" rx="9" ry="46"/>
+                <line x1="4" y1="50" x2="96" y2="50"/>
+                <line x1="50" y1="4" x2="50" y2="96"/>
+                <circle cx="50" cy="50" r="2" fill="currentColor"/>
+              </svg>
+            </div>
+
+            <div class="h-num">
+              <div class="row"><span>magnitude</span><span>code</span></div>
+              <div class="big magnet" data-strength="0.4">v.16</div>
+              <div class="row"><span>edition</span><span>06/26</span></div>
+            </div>
+
+            <div class="h-grid">
+              <div class="cell solid"><span>seed</span><span><b style="color:#6c8dff">26</b></span></div>
+              <div class="cell">
+                <span><b>+</b> ready</span>
+                <div class="halfs"><span class="h"></span><span class="h r"></span><span class="h t"></span></div>
+              </div>
+              <div class="cell hatch"></div>
+              <div class="cell"><span>x798</span><span><b>09.02</b></span></div>
+              <div class="cell"><span>SR22504</span><span class="b">— PT07</span></div>
+              <div class="cell solid"><span style="color:#6c8dff">subtle</span><span>—</span></div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- ABOUT -->
+    <section class="about">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="num magnet" data-strength="0.35">01</span>
+          <span class="title">subject / about</span>
+          <span class="right">whoami</span>
+          <span class="chip"><span class="b">●</span> specificity · one</span>
+        </div>
+
+        <div class="about-grid">
+          <div class="about-text reveal">
+            <p>
+              Hello, I'm <strong>aqua_syntax</strong>. I do a lot of stuff.
+              I do <em>IT stuff</em>, music production, 3d modelling and
+              3d printing.
+            </p>
+            <p>
+              I also like to make small little neat apps that amplify your
+              software experience. And I like to make games too of course —
+              mostly on <em>Roblox</em>, horror driven, or more action sided.
+              Feel free to check any of these out in the links below ^^
+            </p>
+          </div>
+
+          <div class="about-aside reveal">
+            <div class="panel">
+              <div class="panel-h blue"><span class="num">01</span><span>magnitude</span><span class="right">—</span></div>
+              <div style="padding:12px;">
+                <div class="sm">edition</div>
+                <div class="lg b">v.16</div>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="panel-h"><span class="num">02</span><span>terminal</span><span class="right">5</span></div>
+              <div style="padding:12px;">
+                <div class="sm">code</div>
+                <div class="lg">36400</div>
+              </div>
+            </div>
+            <div class="panel full">
+              <div class="panel-h"><span class="num">03</span><span>vertical ray / barcode</span><span class="right">SR22504</span></div>
+              <div class="barcode-box"><div class="barcode"></div></div>
+            </div>
+            <div class="panel" style="padding:12px;">
+              <div class="sm">coordinates</div>
+              <div class="lg" style="font-size:clamp(1rem,1.6vw,1.3rem); letter-spacing:0.04em;">59°56'N&nbsp;/&nbsp;10°45'E</div>
+            </div>
+            <div class="panel hatch blue" style="min-height: 88px;"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- WORK -->
+    <section class="work">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="num magnet" data-strength="0.35">02</span>
+          <span class="title">selected / work</span>
+          <span class="right">things I've built</span>
+          <span class="chip"><span class="b">▲</span> recent · ongoing</span>
+        </div>
+
+        <div class="work-list">
+
+          <!-- ============================================ GITHUB -->
+          <div class="proj-group">
+            <div class="proj-group-head reveal">
+              <span class="gh-key">G/</span>
+              <span class="gh-name">github</span>
+              <span class="gh-meta">code · repos</span>
+            </div>
+
+            <a class="proj reveal" href="https://github.com/SuperSpaceStep/DesktopCat_V2_Mac" target="_blank" rel="noopener">
+              <div class="col-num">
+                <div class="num magnet" data-strength="0.35">G-01</div>
+                <div class="meta">
+                  <div><b>AI</b> · USED</div>
+                  <div><b>TYPE</b> · desktop / mac</div>
+                  <div><b>REF</b> · AS-GH-01</div>
+                </div>
+              </div>
+              <div class="col-body">
+                <div class="header"><span>github / 01</span><span>desktop pet</span></div>
+                <h3 class="title">Desktop cat <em>V2</em> mac</h3>
+                <p class="desc">AI used</p>
+                <div class="tagline"><span>SUBJECT: desktop / mac</span><span class="b">→ view</span></div>
+              </div>
+              <div class="col-deco">
+                <div class="top"><span>G-01</span><span style="color:var(--blue);font-weight:700">●</span></div>
+                <div class="mid">
+                  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
+                </div>
+                <div class="bottom"><div class="hatch"></div><div class="hatch blue"></div></div>
+              </div>
+            </a>
+
+            <a class="proj reveal" href="https://github.com/SuperSpaceStep/Chat_webpage" target="_blank" rel="noopener">
+              <div class="col-num">
+                <div class="num magnet" data-strength="0.35">G-02</div>
+                <div class="meta">
+                  <div><b>AI</b> · USED</div>
+                  <div><b>TYPE</b> · web</div>
+                  <div><b>REF</b> · AS-GH-02</div>
+                </div>
+              </div>
+              <div class="col-body">
+                <div class="header"><span>github / 02</span><span>web app</span></div>
+                <h3 class="title">Chat <em>website</em></h3>
+                <p class="desc">AI used</p>
+                <div class="tagline"><span>SUBJECT: web / chat</span><span class="b">→ view</span></div>
+              </div>
+              <div class="col-deco">
+                <div class="top"><span>G-02</span><span style="color:var(--blue);font-weight:700">●</span></div>
+                <div class="mid">
+                  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
+                </div>
+                <div class="bottom"><div class="hatch blue"></div><div class="hatch"></div></div>
+              </div>
+            </a>
+          </div>
+
+          <!-- ============================================ ROBLOX -->
+          <div class="proj-group">
+            <div class="proj-group-head reveal">
+              <span class="gh-key">R/</span>
+              <span class="gh-name">roblox</span>
+              <span class="gh-meta">games · experiences</span>
+            </div>
+
+            <a class="proj reveal" href="https://www.roblox.com/games/112564557112956/The-Nightguard" target="_blank" rel="noopener">
+              <div class="col-num">
+                <div class="num magnet" data-strength="0.35">R-01</div>
+                <div class="meta">
+                  <div><b>AI</b> · NOT USED</div>
+                  <div><b>TYPE</b> · game / horror</div>
+                  <div><b>REF</b> · AS-RB-01</div>
+                </div>
+              </div>
+              <div class="col-body">
+                <div class="header"><span>roblox / 01</span><span>horror</span></div>
+                <h3 class="title">The <em>nightguard</em></h3>
+                <p class="desc">AI not used</p>
+                <div class="tagline"><span>SUBJECT: roblox / horror</span><span class="b">→ view</span></div>
+              </div>
+              <div class="col-deco">
+                <div class="top"><span>R-01</span><span style="color:var(--blue);font-weight:700">●</span></div>
+                <div class="mid">
+                  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18.926 23.998 0 18.892 5.075.002 24 5.108ZM15.348 10.09l-5.282-1.453-1.414 5.273 5.282 1.453z"/></svg>
+                </div>
+                <div class="bottom"><div class="hatch"></div><div class="hatch blue"></div></div>
+              </div>
+            </a>
+
+            <a class="proj reveal" href="https://www.roblox.com/games/107436537597973/Worlds-Hardest-Escape-Room" target="_blank" rel="noopener">
+              <div class="col-num">
+                <div class="num magnet" data-strength="0.35">R-02</div>
+                <div class="meta">
+                  <div><b>AI</b> · NOT USED</div>
+                  <div><b>TYPE</b> · game / puzzle</div>
+                  <div><b>REF</b> · AS-RB-02</div>
+                </div>
+              </div>
+              <div class="col-body">
+                <div class="header"><span>roblox / 02</span><span>puzzle</span></div>
+                <h3 class="title">Escape <em>room</em></h3>
+                <p class="desc">AI not used</p>
+                <div class="tagline"><span>SUBJECT: roblox / puzzle</span><span class="b">→ view</span></div>
+              </div>
+              <div class="col-deco">
+                <div class="top"><span>R-02</span><span style="color:var(--blue);font-weight:700">●</span></div>
+                <div class="mid">
+                  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18.926 23.998 0 18.892 5.075.002 24 5.108ZM15.348 10.09l-5.282-1.453-1.414 5.273 5.282 1.453z"/></svg>
+                </div>
+                <div class="bottom"><div class="hatch blue"></div><div class="hatch"></div></div>
+              </div>
+            </a>
+
+            <a class="proj reveal" href="https://www.roblox.com/games/17854944323/DeepEnd" target="_blank" rel="noopener">
+              <div class="col-num">
+                <div class="num magnet" data-strength="0.35">R-03</div>
+                <div class="meta">
+                  <div><b>AI</b> · USED</div>
+                  <div><b>TYPE</b> · group / studio</div>
+                  <div><b>REF</b> · AS-RB-03</div>
+                </div>
+              </div>
+              <div class="col-body">
+                <div class="header"><span>roblox / 03</span><span>studio</span></div>
+                <h3 class="title"><em>DeepEnd</em></h3>
+                <p class="desc">AI used</p>
+                <div class="tagline"><span>SUBJECT: roblox / studio</span><span class="b">→ view</span></div>
+              </div>
+              <div class="col-deco">
+                <div class="top"><span>R-03</span><span style="color:var(--blue);font-weight:700">●</span></div>
+                <div class="mid">
+                  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18.926 23.998 0 18.892 5.075.002 24 5.108ZM15.348 10.09l-5.282-1.453-1.414 5.273 5.282 1.453z"/></svg>
+                </div>
+                <div class="bottom"><div class="hatch"></div><div class="hatch blue"></div></div>
+              </div>
+            </a>
+
+            <a class="proj reveal" href="https://www.roblox.com/games/135735334004764/movement-system" target="_blank" rel="noopener">
+              <div class="col-num">
+                <div class="num magnet" data-strength="0.35">R-04</div>
+                <div class="meta">
+                  <div><b>AI</b> · NOT USED</div>
+                  <div><b>TYPE</b> · system / tech</div>
+                  <div><b>REF</b> · AS-RB-04</div>
+                </div>
+              </div>
+              <div class="col-body">
+                <div class="header"><span>roblox / 04</span><span>movement</span></div>
+                <h3 class="title">Movement <em>system</em></h3>
+                <p class="desc">AI not used</p>
+                <div class="tagline"><span>SUBJECT: roblox / movement</span><span class="b">→ view</span></div>
+              </div>
+              <div class="col-deco">
+                <div class="top"><span>R-04</span><span style="color:var(--blue);font-weight:700">●</span></div>
+                <div class="mid">
+                  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18.926 23.998 0 18.892 5.075.002 24 5.108ZM15.348 10.09l-5.282-1.453-1.414 5.273 5.282 1.453z"/></svg>
+                </div>
+                <div class="bottom"><div class="hatch blue"></div><div class="hatch"></div></div>
+              </div>
+            </a>
+          </div>
+
+          <!-- ============================================ MAKERWORLD -->
+          <div class="proj-group">
+            <div class="proj-group-head reveal">
+              <span class="gh-key">M/</span>
+              <span class="gh-name">makerworld</span>
+              <span class="gh-meta">3d models · prints</span>
+            </div>
+
+            <a class="proj reveal" href="https://makerworld.com/en/models/1056040-ps5-controller-holder#profileId-1043596" target="_blank" rel="noopener">
+              <div class="col-num">
+                <div class="num magnet" data-strength="0.35">M-01</div>
+                <div class="meta">
+                  <div><b>AI</b> · NOT USED</div>
+                  <div><b>TYPE</b> · accessory</div>
+                  <div><b>REF</b> · AS-MW-01</div>
+                </div>
+              </div>
+              <div class="col-body">
+                <div class="header"><span>makerworld / 01</span><span>holder</span></div>
+                <h3 class="title">PS5 Controller <em>holder</em></h3>
+                <p class="desc">AI not used</p>
+                <div class="tagline"><span>SUBJECT: 3d / accessory</span><span class="b">→ view</span></div>
+              </div>
+              <div class="col-deco">
+                <div class="top"><span>M-01</span><span style="color:var(--blue);font-weight:700">●</span></div>
+                <div class="mid">
+                  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12.662 24V8.959l8.535 3.369V24zm-9.859-.003v-7.521l8.534-3.371-.001 10.892zM2.803 0h8.533l.001 11.672-8.534 3.369zm9.859 0h8.535v10.892l-8.535-3.371z"/></svg>
+                </div>
+                <div class="bottom"><div class="hatch"></div><div class="hatch blue"></div></div>
+              </div>
+            </a>
+
+            <a class="proj reveal" href="https://makerworld.com/en/models/1185472-fidget-wheel-jumbo-size#profileId-1196391" target="_blank" rel="noopener">
+              <div class="col-num">
+                <div class="num magnet" data-strength="0.35">M-02</div>
+                <div class="meta">
+                  <div><b>AI</b> · NOT USED</div>
+                  <div><b>TYPE</b> · fidget / jumbo</div>
+                  <div><b>REF</b> · AS-MW-02</div>
+                </div>
+              </div>
+              <div class="col-body">
+                <div class="header"><span>makerworld / 02</span><span>jumbo</span></div>
+                <h3 class="title">Fidget wheel <em>jumbo</em> size</h3>
+                <p class="desc">AI not used</p>
+                <div class="tagline"><span>SUBJECT: 3d / fidget</span><span class="b">→ view</span></div>
+              </div>
+              <div class="col-deco">
+                <div class="top"><span>M-02</span><span style="color:var(--blue);font-weight:700">●</span></div>
+                <div class="mid">
+                  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12.662 24V8.959l8.535 3.369V24zm-9.859-.003v-7.521l8.534-3.371-.001 10.892zM2.803 0h8.533l.001 11.672-8.534 3.369zm9.859 0h8.535v10.892l-8.535-3.371z"/></svg>
+                </div>
+                <div class="bottom"><div class="hatch blue"></div><div class="hatch"></div></div>
+              </div>
+            </a>
+
+            <a class="proj reveal" href="https://makerworld.com/en/models/1062671-fidget-wheel-v3#profileId-1051159" target="_blank" rel="noopener">
+              <div class="col-num">
+                <div class="num magnet" data-strength="0.35">M-03</div>
+                <div class="meta">
+                  <div><b>AI</b> · NOT USED</div>
+                  <div><b>TYPE</b> · fidget / v3</div>
+                  <div><b>REF</b> · AS-MW-03</div>
+                </div>
+              </div>
+              <div class="col-body">
+                <div class="header"><span>makerworld / 03</span><span>v3</span></div>
+                <h3 class="title">Fidget wheel <em>V3</em></h3>
+                <p class="desc">AI not used</p>
+                <div class="tagline"><span>SUBJECT: 3d / fidget</span><span class="b">→ view</span></div>
+              </div>
+              <div class="col-deco">
+                <div class="top"><span>M-03</span><span style="color:var(--blue);font-weight:700">●</span></div>
+                <div class="mid">
+                  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12.662 24V8.959l8.535 3.369V24zm-9.859-.003v-7.521l8.534-3.371-.001 10.892zM2.803 0h8.533l.001 11.672-8.534 3.369zm9.859 0h8.535v10.892l-8.535-3.371z"/></svg>
+                </div>
+                <div class="bottom"><div class="hatch"></div><div class="hatch blue"></div></div>
+              </div>
+            </a>
+
+            <a class="proj reveal" href="https://makerworld.com/en/models/1059646-fidget-wheel-v2#profileId-1047661" target="_blank" rel="noopener">
+              <div class="col-num">
+                <div class="num magnet" data-strength="0.35">M-04</div>
+                <div class="meta">
+                  <div><b>AI</b> · NOT USED</div>
+                  <div><b>TYPE</b> · fidget / v2</div>
+                  <div><b>REF</b> · AS-MW-04</div>
+                </div>
+              </div>
+              <div class="col-body">
+                <div class="header"><span>makerworld / 04</span><span>v2</span></div>
+                <h3 class="title">Fidget wheel <em>V2</em></h3>
+                <p class="desc">AI not used</p>
+                <div class="tagline"><span>SUBJECT: 3d / fidget</span><span class="b">→ view</span></div>
+              </div>
+              <div class="col-deco">
+                <div class="top"><span>M-04</span><span style="color:var(--blue);font-weight:700">●</span></div>
+                <div class="mid">
+                  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12.662 24V8.959l8.535 3.369V24zm-9.859-.003v-7.521l8.534-3.371-.001 10.892zM2.803 0h8.533l.001 11.672-8.534 3.369zm9.859 0h8.535v10.892l-8.535-3.371z"/></svg>
+                </div>
+                <div class="bottom"><div class="hatch blue"></div><div class="hatch"></div></div>
+              </div>
+            </a>
+
+            <a class="proj reveal" href="https://makerworld.com/en/collections/5409061-marble-run-components" target="_blank" rel="noopener">
+              <div class="col-num">
+                <div class="num magnet" data-strength="0.35">M-05</div>
+                <div class="meta">
+                  <div><b>AI</b> · NOT USED</div>
+                  <div><b>TYPE</b> · components</div>
+                  <div><b>REF</b> · AS-MW-05</div>
+                </div>
+              </div>
+              <div class="col-body">
+                <div class="header"><span>makerworld / 05</span><span>marble</span></div>
+                <h3 class="title">Marble <em>components</em></h3>
+                <p class="desc">AI not used</p>
+                <div class="tagline"><span>SUBJECT: 3d / marble</span><span class="b">→ view</span></div>
+              </div>
+              <div class="col-deco">
+                <div class="top"><span>M-05</span><span style="color:var(--blue);font-weight:700">●</span></div>
+                <div class="mid">
+                  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12.662 24V8.959l8.535 3.369V24zm-9.859-.003v-7.521l8.534-3.371-.001 10.892zM2.803 0h8.533l.001 11.672-8.534 3.369zm9.859 0h8.535v10.892l-8.535-3.371z"/></svg>
+                </div>
+                <div class="bottom"><div class="hatch"></div><div class="hatch blue"></div></div>
+              </div>
+            </a>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- ELSEWHERE — v2 stretch-on-hover layout -->
+    <section class="elsewhere">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="num magnet" data-strength="0.35">03</span>
+          <span class="title">addresses / elsewhere</span>
+          <span class="right">find me at</span>
+          <span class="chip"><span class="b">◯</span> entries · 09</span>
+        </div>
+
+        <div class="else-list">
+          <a class="else-row" href="https://steamcommunity.com/profiles/76561199443589865/" target="_blank" rel="noopener">
+            <span class="arrow">→</span>
+            <span class="name">Steam</span>
+            <span class="handle">/id/aqua_syntax</span>
+            <span class="label">games</span>
+          </a>
+          <a class="else-row" href="https://github.com/SuperSpaceStep" target="_blank" rel="noopener">
+            <span class="arrow">→</span>
+            <span class="name">GitHub</span>
+            <span class="handle">/aqua-syntax</span>
+            <span class="label">code</span>
+          </a>
+          <a class="else-row" href="https://www.instagram.com/aqua_syntax/" target="_blank" rel="noopener">
+            <span class="arrow">→</span>
+            <span class="name">Instagram</span>
+            <span class="handle">@aqua_syntax</span>
+            <span class="label">photos</span>
+          </a>
+          <a class="else-row" href="#" data-copy="WorldWideSyntax" data-copy-msg="Username copied">
+            <span class="arrow">→</span>
+            <span class="name">Discord</span>
+            <span class="handle">WorldWideSyntax</span>
+            <span class="label">chat</span>
+          </a>
+          <a class="else-row" href="https://www.youtube.com/@WorldWideSyntax" target="_blank" rel="noopener">
+            <span class="arrow">→</span>
+            <span class="name">YouTube</span>
+            <span class="handle">/@WorldWideSyntax</span>
+            <span class="label">video</span>
+          </a>
+          <a class="else-row" href="https://open.spotify.com/user/aqua_syntax" target="_blank" rel="noopener">
+            <span class="arrow">→</span>
+            <span class="name">Spotify</span>
+            <span class="handle">/aqua_syntax</span>
+            <span class="label">music</span>
+          </a>
+          <a class="else-row" href="https://makerworld.com/en/@WorldWideSyntax" target="_blank" rel="noopener">
+            <span class="arrow">→</span>
+            <span class="name">MakerWorld</span>
+            <span class="handle">/u/WorldWideSyntax</span>
+            <span class="label">3d</span>
+          </a>
+          <a class="else-row" href="https://www.roblox.com/users/1725753484/profile" target="_blank" rel="noopener">
+            <span class="arrow">→</span>
+            <span class="name">Roblox</span>
+            <span class="handle">/users/1725753484</span>
+            <span class="label">play</span>
+          </a>
+          <a class="else-row" href="https://www.roblox.com/communities/35088381/DeepEnd-Entertainment#!/about" target="_blank" rel="noopener">
+            <span class="arrow">→</span>
+            <span class="name">Roblox Group</span>
+            <span class="handle">/groups/35088381</span>
+            <span class="label">build</span>
+          </a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- FOOTER (no "end of file / terminal exit" anymore) -->
+  <footer>
+    <div class="wrap">
+      <div class="foot">
+        <div class="big">
+          An archive of <em>small things</em>.
+        </div>
+        <div class="foot-meta">
+          © 2026 — Aqua_hub<br>
+          <a href="mailto:krilicht@gmail.com" data-copy="krilicht@gmail.com" data-copy-msg="Email copied">krilicht@gmail.com <span class="copy-hint">⧉ copy</span></a>
+        </div>
+        <div class="foot-meta" style="text-align:right;">
+          File&nbsp;/&nbsp;v16.html<br>
+          REF&nbsp;/&nbsp;AS-26-001
+        </div>
+      </div>
+      <div class="foot-sig">
+        <span><span class="b">●</span>&nbsp; vol. xvi</span>
+        <span>ultralight</span>
+        <span>magnitude code</span>
+        <span>SR22504</span>
+        <span>PT07</span>
+        <span class="b">— 2026</span>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    /* =========================================================
+       BACKGROUND GRADIENT SHADER — WebGL fragment shader
+       ---------------------------------------------------------
+       A 4-anchor MESH GRADIENT (cobalt / peach / bone / lavender)
+       whose anchor positions drift over time, mixed back toward
+       bone-white so the schematic content remains legible.
+
+       The cursor's smoothed velocity is fed in as a uniform; the
+       shader offsets sample UVs within a smoothstep radius around
+       the cursor, so when the cursor moves the gradient APPEARS
+       to drag in that direction (same velocity-displacement model
+       as the hero title — just GPU-native, full-screen).
+
+       No library. ~120 lines of vanilla WebGL.
+       ========================================================= */
+    (function () {
+      var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      var canvas = document.getElementById("bg-shader");
+      if (!canvas) return;
+
+      var gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+      if (!gl) return;  // browser without WebGL → blank canvas, body bg shows
+
+      /* ---- shader sources ---- */
+      var vsSrc =
+        "attribute vec2 a_position;" +
+        "varying vec2 vUv;" +
+        "void main() {" +
+        "  vUv = a_position * 0.5 + 0.5;" +
+        "  gl_Position = vec4(a_position, 0.0, 1.0);" +
+        "}";
+
+      var fsSrc =
+        "precision mediump float;" +
+        "varying vec2 vUv;" +
+        "uniform vec2 uResolution;" +
+        "uniform float uTime;" +
+        "uniform vec2 uMouse;" +
+        "uniform vec2 uVelocity;" +
+        "uniform float uInside;" +
+        /* ----- soft-blob field sampled at an arbitrary UV -----
+           5 drifting Gaussian blobs over a bone-white field. Linear
+           mix (clamped) keeps the falloff smooth so blobs stay blurred
+           at the edges — that's the "blur" the rest of the page sits on. */
+        "vec3 sampleField(vec2 sampleUv, float t, vec2 ar) {" +
+        "  vec2 a1 = vec2(0.20 + 0.35 * sin(t * 0.9 + 0.0), 0.30 + 0.32 * cos(t * 0.7 + 0.5));" +
+        "  vec2 a2 = vec2(0.80 + 0.32 * cos(t * 1.1 + 1.0), 0.22 + 0.34 * sin(t * 1.2 + 1.5));" +
+        "  vec2 a3 = vec2(0.30 + 0.34 * cos(t * 0.8 + 2.0), 0.80 + 0.30 * sin(t * 1.0 + 2.5));" +
+        "  vec2 a4 = vec2(0.78 + 0.30 * sin(t * 1.3 + 3.0), 0.68 + 0.30 * cos(t * 0.9 + 3.5));" +
+        "  vec2 a5 = vec2(0.50 + 0.38 * sin(t * 0.6 + 4.0), 0.50 + 0.30 * cos(t * 1.1 + 4.5));" +
+        "  vec3 BLUE  = vec3(0.122, 0.192, 1.000);" +
+        "  vec3 LITE  = vec3(0.620, 0.760, 1.000);" +
+        "  vec3 WHITE = vec3(0.965, 0.965, 0.953);" +
+        "  float SHARP = 3.6;" +   /* lower = softer / more blurry */
+        "  float w1 = exp(-pow(distance(sampleUv * ar, a1 * ar) * SHARP, 2.0));" +
+        "  float w2 = exp(-pow(distance(sampleUv * ar, a2 * ar) * SHARP, 2.0));" +
+        "  float w3 = exp(-pow(distance(sampleUv * ar, a3 * ar) * SHARP, 2.0));" +
+        "  float w4 = exp(-pow(distance(sampleUv * ar, a4 * ar) * SHARP, 2.0));" +
+        "  float w5 = exp(-pow(distance(sampleUv * ar, a5 * ar) * SHARP * 0.85, 2.0));" +
+        "  vec3 col = WHITE;" +
+        "  col = mix(col, BLUE,  clamp(w1, 0.0, 1.0));" +
+        "  col = mix(col, LITE,  clamp(w2, 0.0, 1.0));" +
+        "  col = mix(col, BLUE,  clamp(w3, 0.0, 1.0));" +
+        "  col = mix(col, LITE,  clamp(w4, 0.0, 1.0));" +
+        "  col = mix(col, WHITE, clamp(w5, 0.0, 1.0));" +
+        "  return col;" +
+        "}" +
+        "void main() {" +
+        "  vec2 uv = vUv;" +
+        "  float t = uTime * 0.08;" +
+        "  vec2 ar = vec2(uResolution.x / uResolution.y, 1.0);" +
+        /* ----- cursor proximity (k = 1 at the cursor, 0 outside RADIUS) ----- */
+        "  float d = distance(uv, uMouse);" +
+        "  float k = smoothstep(0.28, 0.0, d) * uInside;" +
+        /* ----- velocity offset (continuous) ----- */
+        "  vec2 offset = -uVelocity * 1.2 * k;" +
+        /* Two sample positions are computed:
+           - smoothUv: the regular per-pixel position plus offset.
+             Produces the soft blurred blob field as before.
+           - pixelUv: the CELL-CENTRE UV plus offset. Every pixel inside
+             the same cell reads from the same point → that cell shows a
+             single uniform colour → chunky pixel-grid look. */
+        "  vec2 smoothUv = uv + offset;" +
+        "  float CELL = 38.0;" +
+        "  vec2 cell = vec2(CELL) / uResolution;" +
+        "  vec2 pixelUv = (floor(uv / cell) + 0.5) * cell + offset;" +
+        /* Mix between them by cursor proximity:
+           - k = 0 (no cursor) → pure smooth blurred blobs
+           - k = 1 (right at cursor) → pure cell-quantised pixel grid
+           So the "pixel shader" effect appears LOCALLY over the blur,
+           where the cursor is acting, and falls off smoothly outward. */
+        "  vec3 colSmooth = sampleField(smoothUv, t, ar);" +
+        "  vec3 colPixel  = sampleField(pixelUv,  t, ar);" +
+        "  vec3 col = mix(colSmooth, colPixel, k);" +
+        /* film grain */
+        "  float grain = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);" +
+        "  col += (grain - 0.5) * 0.012;" +
+        "  gl_FragColor = vec4(col, 1.0);" +
+        "}";
+
+      function compile(type, src) {
+        var s = gl.createShader(type);
+        gl.shaderSource(s, src);
+        gl.compileShader(s);
+        if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+          console.error("shader compile:", gl.getShaderInfoLog(s));
+          gl.deleteShader(s); return null;
+        }
+        return s;
+      }
+      var vs = compile(gl.VERTEX_SHADER, vsSrc);
+      var fs = compile(gl.FRAGMENT_SHADER, fsSrc);
+      if (!vs || !fs) return;
+
+      var prog = gl.createProgram();
+      gl.attachShader(prog, vs);
+      gl.attachShader(prog, fs);
+      gl.linkProgram(prog);
+      if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+        console.error("link:", gl.getProgramInfoLog(prog));
+        return;
+      }
+      gl.useProgram(prog);
+
+      /* fullscreen quad (two triangles in clip space) */
+      var buf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.bufferData(gl.ARRAY_BUFFER,
+        new Float32Array([-1,-1, 1,-1, -1,1,  -1,1, 1,-1, 1,1]),
+        gl.STATIC_DRAW);
+      var aPos = gl.getAttribLocation(prog, "a_position");
+      gl.enableVertexAttribArray(aPos);
+      gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+      var uRes = gl.getUniformLocation(prog, "uResolution");
+      var uTime = gl.getUniformLocation(prog, "uTime");
+      var uMouse = gl.getUniformLocation(prog, "uMouse");
+      var uVel = gl.getUniformLocation(prog, "uVelocity");
+      var uIn = gl.getUniformLocation(prog, "uInside");
+
+      function resize() {
+        var dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+        canvas.width = Math.max(2, Math.round(window.innerWidth * dpr));
+        canvas.height = Math.max(2, Math.round(window.innerHeight * dpr));
+        canvas.style.width = window.innerWidth + "px";
+        canvas.style.height = window.innerHeight + "px";
+        gl.viewport(0, 0, canvas.width, canvas.height);
+      }
+      window.addEventListener("resize", resize);
+      resize();
+
+      /* ---- velocity tracking on window (full-page cursor) ---- */
+      var mouseX = 0.5, mouseY = 0.5;
+      var prevX = null, prevY = null;
+      var velX = 0, velY = 0;
+      var inside = 0;
+      var VEL_SMOOTH = 0.55;
+      var VEL_DECAY  = 0.86;
+
+      window.addEventListener("pointermove", function (e) {
+        var nx = e.clientX / window.innerWidth;
+        var ny = 1 - (e.clientY / window.innerHeight);  /* GL y is bottom-up */
+        if (prevX !== null) {
+          var dx = nx - prevX;
+          var dy = ny - prevY;
+          velX = velX * (1 - VEL_SMOOTH) + dx * VEL_SMOOTH;
+          velY = velY * (1 - VEL_SMOOTH) + dy * VEL_SMOOTH;
+        }
+        prevX = nx; prevY = ny;
+        mouseX = nx; mouseY = ny;
+        inside = 1;
+      }, { passive: true });
+      window.addEventListener("pointerleave", function () {
+        inside = 0; prevX = null; prevY = null;
+        velX = 0; velY = 0;
+      });
+      document.addEventListener("visibilitychange", function () {
+        if (document.hidden) { velX = 0; velY = 0; }
+      });
+
+      var t0 = performance.now();
+      function tick() {
+        velX *= VEL_DECAY;
+        velY *= VEL_DECAY;
+        if (Math.abs(velX) < 0.00008) velX = 0;
+        if (Math.abs(velY) < 0.00008) velY = 0;
+
+        gl.uniform2f(uRes, canvas.width, canvas.height);
+        gl.uniform1f(uTime, (performance.now() - t0) / 1000);
+        gl.uniform2f(uMouse, mouseX, mouseY);
+        /* flip the velocity sign so pixels APPEAR to follow the cursor
+           (sampling from the trailing side makes the destination read
+           as being dragged along — matches the title's behaviour) */
+        gl.uniform2f(uVel, -velX, -velY);
+        gl.uniform1f(uIn, inside);
+
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+        requestAnimationFrame(tick);
+      }
+      if (reduce) {
+        /* one static frame so the page isn't blank */
+        gl.uniform2f(uRes, canvas.width, canvas.height);
+        gl.uniform1f(uTime, 0);
+        gl.uniform2f(uMouse, 0.5, 0.5);
+        gl.uniform2f(uVel, 0, 0);
+        gl.uniform1f(uIn, 0);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+      } else {
+        requestAnimationFrame(tick);
+      }
+    })();
+
+    /* The .magnet grow-and-hold hover is handled by CSS now
+       (`.magnet:hover { transform: scale(1.16) }`). No JS needed. */
+
+    /* =========================================================
+       VELOCITY-DRIVEN DISPLACEMENT on the hero title.
+       ---------------------------------------------------------
+       Behaves like a fluid trail / smudge brush:
+         - Tiles only displace when the CURSOR IS MOVING. A
+           stationary cursor over the title leaves the pixels
+           alone; they settle back to origin.
+         - Each displaced tile shifts in the DIRECTION the cursor
+           is currently moving (not toward / away from cursor,
+           not random noise). The cursor "drags" the pixels along
+           its motion vector.
+         - Cursor velocity is tracked from pointermove deltas and
+           decays each frame, so when the cursor stops the force
+           fades and tiles spring back home.
+         - Proximity (smoothstep within RADIUS) still gates which
+           tiles are affected — pixels far from the cursor aren't
+           dragged at all, only the ones the cursor is moving
+           through.
+         - Sampling is GLSL-style: tiles draw at their natural
+           destinations; only the SAMPLE OFFSET changes. No
+           clumping, no shrinking, no migration.
+       ========================================================= */
+    (function () {
+      var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (reduce) return;
+
+      var root   = document.getElementById("shatterRoot");
+      var h1     = document.getElementById("displayName");
+      var canvas = document.getElementById("shatter");
+      if (!root || !h1 || !canvas) return;
+
+      var ctx = canvas.getContext("2d", { alpha: true });
+      var dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+      var off = document.createElement("canvas");
+      var offCtx = off.getContext("2d", { alpha: true });
+
+      var TEXT_PARTS = [
+        { text: "Aqua", color: getCssVar("--ink",  "#0a0a0e") },
+        { text: "_",    color: getCssVar("--blue", "#1f31ff") },
+        { text: "hub",  color: getCssVar("--ink",  "#0a0a0e") }
+      ];
+
+      /* ---- tuning ---- */
+      var COLS         = 22;     // horizontal tile count
+      var ROWS         = 12;     // vertical tile count
+      var INSET_X      = 50;     // canvas extension left/right (CSS px)
+      var INSET_Y      = 60;     // canvas extension top/bottom (CSS px)
+      var RADIUS       = 180;    // cursor influence radius (CSS px)
+      var DRAG         = 2.8;    // velocity → displacement multiplier
+      var MAX_OFFSET   = 55;     // hard cap on per-tile offset (px)
+      var VEL_SMOOTH   = 0.55;   // 0..1 — EMA on raw cursor deltas
+      var VEL_DECAY    = 0.86;   // per-frame velocity decay (→ 0 when still)
+      var SPRING       = 0.16;   // tile spring toward target
+      var DAMP         = 0.80;   // tile velocity damp
+
+      var tiles = [];
+      var tileW = 0, tileH = 0;
+      var W = 0, H = 0;            // full canvas size including insets
+      var textOX = 0, textOY = 0;  // text top-left within canvas
+      var mouseX = -9999, mouseY = -9999;
+      var prevX = null, prevY = null;  // last pointermove position
+      var velX = 0, velY = 0;          // smoothed cursor velocity (px/event, decays per frame)
+      var inside = false;              // is the cursor currently over the canvas?
+      var raf = 0;
+      var visible = true;              // title on screen? (paused when scrolled away)
+      function kick() { if (!raf && visible) raf = requestAnimationFrame(animate); }
+
+      function getCssVar(name, fallback) {
+        var v = getComputedStyle(document.documentElement)
+          .getPropertyValue(name).trim();
+        return v || fallback;
+      }
+
+      function build() {
+        var cs = getComputedStyle(h1);
+        var fontSize   = parseFloat(cs.fontSize) || 80;
+        var fontFamily = cs.fontFamily;
+        var fontWeight = cs.fontWeight || "700";
+        var scaleY = parseFloat(getCssVar("--display-scale", "2.4")) || 2.4;
+        var font = fontWeight + " " + fontSize + "px " + fontFamily;
+
+        var probe = document.createElement("canvas").getContext("2d");
+        probe.font = font;
+        var widths = TEXT_PARTS.map(function (p) { return probe.measureText(p.text).width; });
+        var totalW = widths.reduce(function (a, b) { return a + b; }, 0);
+
+        var padX = Math.ceil(fontSize * 0.08);
+        var textW = Math.ceil(totalW) + padX * 2;
+        var textH = Math.ceil(fontSize * scaleY * 1.05);
+
+        /* canvas extends INSET on each side beyond the text rectangle */
+        W = textW + INSET_X * 2;
+        H = textH + INSET_Y * 2;
+        textOX = INSET_X;
+        textOY = INSET_Y;
+
+        /* canvas bitmap + CSS display sizes (negative top/left positions
+           it so the visible text still sits exactly where the h1 sat) */
+        off.width = Math.round(W * dpr);
+        off.height = Math.round(H * dpr);
+        canvas.width  = off.width;
+        canvas.height = off.height;
+        canvas.style.width  = W + "px";
+        canvas.style.height = H + "px";
+        canvas.style.top    = (-INSET_Y) + "px";
+        canvas.style.left   = (-INSET_X) + "px";
+
+        offCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        offCtx.clearRect(0, 0, W, H);
+        /* keep the offscreen transparent — the visible canvas samples
+           it without smoothing (nearest-neighbour) for that crisp
+           pixel-grid look. No bone plate, no visible rectangle. */
+        offCtx.textBaseline = "middle";
+        offCtx.font = font;
+
+        /* draw text at (textOX, textOY) within the larger canvas */
+        var cx = textOX + padX;
+        TEXT_PARTS.forEach(function (p, i) {
+          offCtx.save();
+          offCtx.translate(cx, textOY + textH / 2);
+          offCtx.scale(1, scaleY);
+          offCtx.fillStyle = p.color;
+          offCtx.fillText(p.text, 0, 0);
+          offCtx.restore();
+          cx += widths[i];
+        });
+
+        /* build COLS×ROWS tile grid over the FULL canvas.
+           No per-tile direction — displacement direction comes from
+           the cursor's current velocity, not from a fixed field. */
+        tileW = W / COLS;
+        tileH = H / ROWS;
+        tiles = [];
+        for (var r = 0; r < ROWS; r++) {
+          for (var c = 0; c < COLS; c++) {
+            var sx = c * tileW;
+            var sy = r * tileH;
+            tiles.push({
+              sx: sx, sy: sy,
+              tcx: sx + tileW / 2,
+              tcy: sy + tileH / 2,
+              ox: 0, oy: 0,           // current sample-offset
+              vx: 0, vy: 0            // spring velocity
+            });
+          }
+        }
+
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        /* Crisp pixel sampling — turning OFF imageSmoothing makes
+           drawImage use nearest-neighbour. Sub-pixel offsets snap
+           to the nearest source pixel → no interpolation blur, and
+           the displacement reads as discrete pixel-grid squares. */
+        ctx.imageSmoothingEnabled = false;
+        root.classList.add("live");
+      }
+
+      function animate() {
+        if (!visible) { raf = 0; return; }
+        ctx.clearRect(0, 0, W, H);
+
+        /* Velocity naturally decays each frame. If the cursor isn't
+           moving (no pointermove events arrive), velX/velY shrink
+           to ~0 in a handful of frames and every tile's target
+           offset falls to 0 → they spring back home. */
+        velX *= VEL_DECAY;
+        velY *= VEL_DECAY;
+        if (Math.abs(velX) < 0.02) velX = 0;
+        if (Math.abs(velY) < 0.02) velY = 0;
+
+        var r2 = RADIUS * RADIUS;
+        var anyForce = inside && (velX !== 0 || velY !== 0);
+        var stillMoving = false;
+
+        for (var i = 0; i < tiles.length; i++) {
+          var t = tiles[i];
+
+          /* Target offset = cursor velocity (the drag direction)
+             scaled by smoothstep proximity, clamped to MAX_OFFSET.
+             Pixels far from the cursor get 0; pixels right under the
+             cursor get full drag; static cursor → no drag.            */
+          var sox = 0, soy = 0;
+          if (anyForce) {
+            var dx = mouseX - t.tcx;
+            var dy = mouseY - t.tcy;
+            var d2 = dx*dx + dy*dy;
+            if (d2 < r2) {
+              var d = Math.sqrt(d2);
+              var k = 1 - d / RADIUS;
+              k = k * k * (3 - 2 * k);   // smoothstep
+              /* Sample from the OPPOSITE side of the velocity vector so
+                 the drawn pixels APPEAR to follow the cursor's direction
+                 rather than fight it. (drawImage samples from src+offset
+                 and draws at the natural destination; sampling from the
+                 trailing side makes the destination read as "dragged".) */
+              sox = -velX * DRAG * k;
+              soy = -velY * DRAG * k;
+              if (sox >  MAX_OFFSET) sox =  MAX_OFFSET;
+              if (sox < -MAX_OFFSET) sox = -MAX_OFFSET;
+              if (soy >  MAX_OFFSET) soy =  MAX_OFFSET;
+              if (soy < -MAX_OFFSET) soy = -MAX_OFFSET;
+            }
+          }
+
+          /* Spring toward target (or back to 0 if no force) */
+          t.vx += (sox - t.ox) * SPRING;
+          t.vy += (soy - t.oy) * SPRING;
+          t.vx *= DAMP; t.vy *= DAMP;
+          t.ox += t.vx; t.oy += t.vy;
+
+          if (!anyForce &&
+              Math.abs(t.vx) < 0.02 && Math.abs(t.vy) < 0.02 &&
+              Math.abs(t.ox) < 0.05 && Math.abs(t.oy) < 0.05) {
+            t.vx = 0; t.vy = 0; t.ox = 0; t.oy = 0;
+          } else {
+            stillMoving = true;
+          }
+
+          /* GLSL-style sample-at-offset; destination never moves.
+             Snap source AND destination to integer pixels so the
+             nearest-neighbour sample stays pixel-perfect — that's
+             what produces the crisp "grid square" look. */
+          ctx.drawImage(
+            off,
+            Math.round((t.sx + t.ox) * dpr), Math.round((t.sy + t.oy) * dpr),
+            Math.round((tileW + 1) * dpr),   Math.round((tileH + 1) * dpr),
+            Math.round(t.sx), Math.round(t.sy),
+            Math.round(tileW + 1), Math.round(tileH + 1)
+          );
+        }
+        if (anyForce || stillMoving) {
+          raf = requestAnimationFrame(animate);
+        } else {
+          raf = 0;   /* settled — park until the cursor returns */
+        }
+      }
+
+      function onMove(e) {
+        var r = canvas.getBoundingClientRect();
+        var nx = e.clientX - r.left;
+        var ny = e.clientY - r.top;
+
+        /* Cursor velocity from the delta between consecutive events,
+           smoothed by an exponential moving average so a single jitter
+           doesn't kick everything. */
+        if (prevX !== null) {
+          var dx = nx - prevX;
+          var dy = ny - prevY;
+          velX = velX * (1 - VEL_SMOOTH) + dx * VEL_SMOOTH;
+          velY = velY * (1 - VEL_SMOOTH) + dy * VEL_SMOOTH;
+        }
+        prevX = nx; prevY = ny;
+        mouseX = nx; mouseY = ny;
+        inside = true;
+        kick();
+      }
+      function onLeave() {
+        inside = false;
+        mouseX = -9999; mouseY = -9999;
+        prevX = null; prevY = null;
+        velX = 0; velY = 0;
+        kick();   /* animate the spring-back, then it parks itself */
+      }
+
+      function ready() {
+        build();
+        if (!raf) raf = requestAnimationFrame(animate);
+      }
+      if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(ready);
+      } else {
+        window.addEventListener("load", ready);
+      }
+
+      /* Pointer events on the CANVAS (not on the inner text) — so the
+         entire extended zone is interactive, and cursor moving off the
+         glyphs into the surrounding margin still drives the effect. */
+      canvas.addEventListener("pointermove", onMove);
+      canvas.addEventListener("pointerleave", onLeave);
+
+      /* pause the loop when the title scrolls out of view */
+      if ("IntersectionObserver" in window) {
+        new IntersectionObserver(function (es) {
+          visible = es[0].isIntersecting;
+          if (visible) kick();
+        }, { rootMargin: "120px" }).observe(canvas);
+      }
+
+      var rt;
+      window.addEventListener("resize", function () {
+        clearTimeout(rt);
+        rt = setTimeout(function () {
+          cancelAnimationFrame(raf); raf = 0;
+          build();
+          if (!raf) raf = requestAnimationFrame(animate);
+        }, 180);
+      });
+    })();
+
+    /* =========================================================
+       Pixel shader on SVG objects (globe + work-card shapes).
+       ---------------------------------------------------------
+       Each target SVG is rasterised to an offscreen canvas once
+       (with currentColor resolved to the element's computed colour
+       so the strokes don't lose their colour in the standalone SVG
+       blob). A visible canvas is positioned over the SVG and the
+       SVG is hidden. The visible canvas runs the SAME velocity-
+       driven sample-at-offset displacement as the title:
+       imageSmoothingEnabled = false + integer-rounded drawImage
+       coords → crisp pixel-grid drag in the cursor's direction.
+       For the globe (`rotateRate` > 0) the offscreen is re-rendered
+       each frame with `ctx.rotate()` applied before sampling, so
+       the displacement is applied to the currently-rotated frame.
+       ========================================================= */
+    (function () {
+      var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (reduce) return;
+
+      /* Each object's canvas is positioned at absolute pixel offsets that
+         are only valid for the layout present when it was built. On resize
+         the layout reflows but the canvas stays pinned → the illustration
+         drifts off-centre. So every instance registers its rebuild here and
+         we re-run them (debounced) whenever the viewport changes. */
+      var rebuilders = [];
+      var rzTimer;
+      window.addEventListener("resize", function () {
+        clearTimeout(rzTimer);
+        rzTimer = setTimeout(function () {
+          for (var i = 0; i < rebuilders.length; i++) rebuilders[i]();
+        }, 220);
+      });
+
+      function applyDisplacement(svgEl, opts) {
+        opts = opts || {};
+        var GRID_COLS   = opts.cols      || 12;
+        var GRID_ROWS   = opts.rows      || 12;
+        var RADIUS      = opts.radius    || 140;
+        var DRAG        = opts.drag      || 0.5;
+        var MAX_OFFSET  = opts.maxOffset || 30;
+        var ROTATE_RATE = opts.rotateRate || 0; // deg / sec
+        var VEL_SMOOTH  = 0.55;
+        var VEL_DECAY   = 0.86;
+        /* Softer spring / heavier damping → tiles return slowly and
+           overshoot a little, giving an elastic "dough" feel rather
+           than the snappy pixel-grid drag the title uses. */
+        var SPRING      = 0.10;
+        var DAMP        = 0.86;
+
+        var parent = svgEl.parentElement;
+        if (!parent) return;
+
+        var current = null;   // teardown handle for the live instance
+
+        function rebuild() {
+          /* drop any previous canvas/loop/observer for this object before
+             rebuilding at the new size & position */
+          if (current) { current.teardown(); current = null; }
+
+          var killed = false;
+
+          /* un-hide BEFORE measuring/serialising: on a rebuild the element
+             still carries the inline visibility:hidden from the previous
+             pass, and XMLSerializer would bake that into the rasterised
+             source → a blank image. We re-hide it again synchronously
+             below (before paint), so there's no flash. */
+          svgEl.style.visibility = "";
+
+          /* read the SVG's rendered size */
+          var rect = svgEl.getBoundingClientRect();
+          var W = Math.max(8, Math.ceil(rect.width));
+          var H = Math.max(8, Math.ceil(rect.height));
+          var dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+          /* serialise the SVG and replace currentColor with the
+             computed colour so the standalone SVG image keeps its
+             stroke colour */
+          var color = getComputedStyle(svgEl).color || "#0a0a0e";
+          var serializer = new XMLSerializer();
+          var svgSource = serializer.serializeToString(svgEl);
+          if (svgSource.indexOf("xmlns=") === -1) {
+            svgSource = svgSource.replace("<svg",
+              "<svg xmlns=\"http://www.w3.org/2000/svg\"");
+          }
+          svgSource = svgSource.replace(/currentColor/g, color);
+
+          /* offscreen for the rasterised SVG */
+          var off = document.createElement("canvas");
+          off.width  = W * dpr;
+          off.height = H * dpr;
+          var offCtx = off.getContext("2d", { alpha: true });
+          offCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+          /* visible canvas — positioned over the SVG, same size,
+             pointer-events captured so hover works */
+          var canvas = document.createElement("canvas");
+          canvas.width  = W * dpr;
+          canvas.height = H * dpr;
+          canvas.style.width  = W + "px";
+          canvas.style.height = H + "px";
+          canvas.style.position = "absolute";
+          canvas.style.pointerEvents = "auto";
+          canvas.setAttribute("aria-hidden", "true");
+
+          /* position it where the SVG currently sits, relative to a
+             positioned ancestor */
+          var anchor = parent;
+          var ps = getComputedStyle(anchor).position;
+          if (ps === "static") { anchor.style.position = "relative"; }
+          var anchorRect = anchor.getBoundingClientRect();
+          canvas.style.top  = (rect.top  - anchorRect.top)  + "px";
+          canvas.style.left = (rect.left - anchorRect.left) + "px";
+
+          svgEl.style.visibility = "hidden";
+          anchor.appendChild(canvas);
+
+          var ctx = canvas.getContext("2d", { alpha: true });
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          /* Smooth sampling (default ON) instead of nearest-neighbour —
+             sub-pixel offsets at tile boundaries blend, so adjacent tiles
+             flow into each other instead of stepping cell-by-cell. That's
+             what produces the elastic "dough" deformation. */
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = "high";
+
+          /* tile grid */
+          var tileW = W / GRID_COLS;
+          var tileH = H / GRID_ROWS;
+          var tiles = [];
+          for (var r = 0; r < GRID_ROWS; r++) {
+            for (var c = 0; c < GRID_COLS; c++) {
+              var sx = c * tileW, sy = r * tileH;
+              tiles.push({
+                sx: sx, sy: sy,
+                tcx: sx + tileW / 2,
+                tcy: sy + tileH / 2,
+                ox: 0, oy: 0, vx: 0, vy: 0
+              });
+            }
+          }
+
+          /* velocity tracking — relative to this canvas */
+          var mouseX = -9999, mouseY = -9999;
+          var prevX = null, prevY = null;
+          var velX = 0, velY = 0;
+          var inside = false;
+          /* loop lifecycle — the loop only runs while the canvas is on
+             screen AND there's something to animate (rotation, an active
+             cursor force, or tiles still springing back to rest). When it
+             settles it stops itself; pointer/visibility events re-arm it.
+             This stops ~12 always-on rAF loops from competing with scroll. */
+          var running = false;
+          var visible = true;
+          function kick() {
+            if (!running && visible) { running = true; requestAnimationFrame(animate); }
+          }
+          canvas.addEventListener("pointermove", function (e) {
+            var b = canvas.getBoundingClientRect();
+            var nx = e.clientX - b.left;
+            var ny = e.clientY - b.top;
+            if (prevX !== null) {
+              velX = velX * (1 - VEL_SMOOTH) + (nx - prevX) * VEL_SMOOTH;
+              velY = velY * (1 - VEL_SMOOTH) + (ny - prevY) * VEL_SMOOTH;
+            }
+            prevX = nx; prevY = ny;
+            mouseX = nx; mouseY = ny;
+            inside = true;
+            kick();
+          }, { passive: true });
+          canvas.addEventListener("pointerleave", function () {
+            inside = false; prevX = null; prevY = null;
+            velX = 0; velY = 0;
+            kick();   /* let the tiles spring back, then it stops itself */
+          });
+
+          /* pause the loop entirely when the canvas scrolls off screen */
+          if ("IntersectionObserver" in window) {
+            var vio = new IntersectionObserver(function (es) {
+              visible = es[0].isIntersecting;
+              if (visible) kick();
+            }, { rootMargin: "120px" });
+            vio.observe(canvas);
+          }
+
+          /* draw the un-rotated SVG into the offscreen */
+          function renderOffscreen(angleDeg) {
+            offCtx.clearRect(0, 0, W, H);
+            if (angleDeg) {
+              offCtx.save();
+              offCtx.translate(W / 2, H / 2);
+              offCtx.rotate(angleDeg * Math.PI / 180);
+              offCtx.drawImage(img, -W / 2, -H / 2, W, H);
+              offCtx.restore();
+            } else {
+              offCtx.drawImage(img, 0, 0, W, H);
+            }
+          }
+
+          var startTime = performance.now();
+          function animate() {
+            if (killed || !visible) { running = false; return; }
+
+            velX *= VEL_DECAY; velY *= VEL_DECAY;
+            if (Math.abs(velX) < 0.05) velX = 0;
+            if (Math.abs(velY) < 0.05) velY = 0;
+
+            /* re-rasterise with rotation if we have one */
+            if (ROTATE_RATE) {
+              var t = (performance.now() - startTime) / 1000;
+              renderOffscreen((t * ROTATE_RATE) % 360);
+            }
+
+            ctx.clearRect(0, 0, W, H);
+            var r2 = RADIUS * RADIUS;
+            var anyForce = inside && (velX !== 0 || velY !== 0);
+            var stillMoving = false;
+
+            for (var i = 0; i < tiles.length; i++) {
+              var t = tiles[i];
+              var sox = 0, soy = 0;
+              if (anyForce) {
+                var dx = mouseX - t.tcx;
+                var dy = mouseY - t.tcy;
+                var d2 = dx*dx + dy*dy;
+                if (d2 < r2) {
+                  var d = Math.sqrt(d2);
+                  var k = 1 - d / RADIUS;
+                  k = k * k * (3 - 2 * k);
+                  sox = -velX * DRAG * k;
+                  soy = -velY * DRAG * k;
+                  if (sox >  MAX_OFFSET) sox =  MAX_OFFSET;
+                  if (sox < -MAX_OFFSET) sox = -MAX_OFFSET;
+                  if (soy >  MAX_OFFSET) soy =  MAX_OFFSET;
+                  if (soy < -MAX_OFFSET) soy = -MAX_OFFSET;
+                }
+              }
+              t.vx += (sox - t.ox) * SPRING;
+              t.vy += (soy - t.oy) * SPRING;
+              t.vx *= DAMP; t.vy *= DAMP;
+              t.ox += t.vx; t.oy += t.vy;
+
+              /* snap tiny residual motion to exact rest so the loop can
+                 actually reach a stop condition instead of jittering */
+              if (!anyForce &&
+                  Math.abs(t.vx) < 0.02 && Math.abs(t.vy) < 0.02 &&
+                  Math.abs(t.ox) < 0.05 && Math.abs(t.oy) < 0.05) {
+                t.vx = 0; t.vy = 0; t.ox = 0; t.oy = 0;
+              } else {
+                stillMoving = true;
+              }
+
+              /* Float coords (no Math.round) — sub-pixel sampling blends
+                 the tile content smoothly across its destination cell,
+                 giving a continuous warp instead of pixel-stepped drag. */
+              ctx.drawImage(
+                off,
+                (t.sx + t.ox) * dpr, (t.sy + t.oy) * dpr,
+                (tileW + 1) * dpr,   (tileH + 1) * dpr,
+                t.sx, t.sy,
+                tileW + 1, tileH + 1
+              );
+            }
+
+            /* keep going only if there's a reason to; otherwise park the
+               loop until a pointer/visibility event re-arms it */
+            if (ROTATE_RATE || anyForce || stillMoving) {
+              requestAnimationFrame(animate);
+            } else {
+              running = false;
+            }
+          }
+
+          /* load the SVG as an Image (async) — then start rendering */
+          var img = new Image();
+          var blob = new Blob([svgSource], { type: "image/svg+xml" });
+          var url  = URL.createObjectURL(blob);
+          img.onload = function () {
+            if (killed) return;
+            renderOffscreen(0);
+            running = true;
+            requestAnimationFrame(animate);
+          };
+          img.onerror = function () {
+            svgEl.style.visibility = "";   // restore original on failure
+            canvas.remove();
+          };
+          img.src = url;
+
+          /* expose a teardown so the next rebuild (e.g. after a resize)
+             can stop this loop and remove its canvas */
+          current = {
+            teardown: function () {
+              killed = true;
+              if (vio) vio.disconnect();
+              if (canvas && canvas.parentNode) canvas.remove();
+              try { URL.revokeObjectURL(url); } catch (e) {}
+            }
+          };
+        }
+
+        /* defer until layout/fonts have settled so getBoundingClientRect
+           returns the final size */
+        if (document.fonts && document.fonts.ready) {
+          document.fonts.ready.then(rebuild);
+        } else {
+          window.addEventListener("load", rebuild);
+        }
+        rebuilders.push(rebuild);   /* re-run on viewport resize */
+      }
+
+      /* targets */
+      window.addEventListener("load", function () {
+        var globe = document.querySelector(".h-globe svg");
+        if (globe) {
+          applyDisplacement(globe, {
+            cols: 22, rows: 22,    /* finer grid → smoother dough warp */
+            radius: 140, drag: 0.55, maxOffset: 34,
+            rotateRate: 360 / 64
+          });
+        }
+        document.querySelectorAll(".proj .col-deco .mid svg").forEach(function (svg) {
+          applyDisplacement(svg, {
+            cols: 16, rows: 16,
+            radius: 90, drag: 0.6, maxOffset: 26
+          });
+        });
+      });
+    })();
+
+    /* =========================================================
+       Reveal on scroll — CHARACTER SCRAMBLE entry.
+       ---------------------------------------------------------
+       When a .reveal element enters the viewport its text nodes
+       are immediately replaced with random glyphs from a pool,
+       then progressively "settle" back to their original chars
+       over ~750 ms (probability of any given char being correct
+       rises with progress²).
+       The element also fades from opacity 0→1 in parallel so the
+       garbled initial state isn't visible at full alpha for a
+       single jarring frame.
+       Whitespace and HTML structure are preserved — we walk text
+       nodes only via TreeWalker, so <strong>, <em>, <span> etc.
+       inside .reveal containers stay intact.
+       ========================================================= */
+    (function () {
+      var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      var GLYPHS = "!#$%&=+?^@AKBEMZXPTRNVCF_-<>0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+      var DURATION = 750;   // ms
+
+      function pickGlyph() {
+        return GLYPHS[(Math.random() * GLYPHS.length) | 0];
+      }
+      function collectTextNodes(root) {
+        var out = [];
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+          acceptNode: function (n) {
+            var p = n.parentElement;
+            if (!p) return NodeFilter.FILTER_REJECT;
+            var tag = p.tagName;
+            if (tag === "SCRIPT" || tag === "STYLE") return NodeFilter.FILTER_REJECT;
+            if (!n.textContent || !n.textContent.trim()) return NodeFilter.FILTER_REJECT;
+            return NodeFilter.FILTER_ACCEPT;
+          }
+        });
+        var node;
+        while ((node = walker.nextNode())) out.push({ n: node, orig: node.textContent });
+        return out;
+      }
+      /* Precompute per-node original text + a whitespace mask so the
+         per-frame loop never runs a regex. */
+      function buildNodes(el) {
+        return collectTextNodes(el).map(function (o) {
+          var ws = [];
+          for (var i = 0; i < o.orig.length; i++) ws.push(/\s/.test(o.orig[i]));
+          return { n: o.n, orig: o.orig, ws: ws };
+        });
+      }
+
+      /* A single shared driver runs ALL active scrambles, throttled to
+         ~30fps, with a hard cap on how many elements animate at once.
+         On a fast scroll a whole screenful of .reveal elements fire
+         together — without the cap that's a burst of synchronous
+         textContent rewrites (= reflow storm) that freezes scrolling.
+         Overflow elements simply reveal their final text immediately
+         (they're already faded in), so nothing is ever left blank. */
+      var active = [];
+      var MAX_ACTIVE = 5;
+      var driverRunning = false;
+      var lastFrame = 0;
+      var FRAME_MS = 33;
+
+      function startOne(el) {
+        var nodes = buildNodes(el);
+        if (!nodes.length) return;
+        /* Lock the element's height for the duration: random glyphs have
+           different widths, so a line sitting near the wrap boundary would
+           otherwise flip between 1 and 2 lines every frame and jitter the
+           whole container's height. Measure with the ORIGINAL text (still
+           in place here), then freeze it. */
+        var lockH = el.getBoundingClientRect().height;
+        var prevMinH = el.style.minHeight;
+        el.style.minHeight = lockH + "px";
+        nodes.forEach(function (o) {
+          var s = o.orig, ws = o.ws, out = "";
+          for (var i = 0; i < s.length; i++) out += ws[i] ? s[i] : pickGlyph();
+          o.n.textContent = out;
+        });
+        active.push({ nodes: nodes, start: performance.now(), el: el, prevMinH: prevMinH });
+      }
+
+      function drive(now) {
+        if (now - lastFrame >= FRAME_MS) {
+          lastFrame = now;
+          for (var a = active.length - 1; a >= 0; a--) {
+            var item = active[a];
+            var t = now - item.start;
+            var done = t >= DURATION;
+            var settle = done ? 1 : (t / DURATION) * (t / DURATION);
+            var nodes = item.nodes;
+            for (var j = 0; j < nodes.length; j++) {
+              var o = nodes[j], s = o.orig, ws = o.ws, out = "";
+              if (done) {
+                out = s;
+              } else {
+                for (var i = 0; i < s.length; i++) {
+                  out += (ws[i] || Math.random() < settle) ? s[i] : pickGlyph();
+                }
+              }
+              o.n.textContent = out;
+            }
+            if (done) {
+              item.el.style.minHeight = item.prevMinH || "";  /* release height lock */
+              active.splice(a, 1);
+            }
+          }
+        }
+        if (active.length) {
+          requestAnimationFrame(drive);
+        } else {
+          driverRunning = false;
+        }
+      }
+
+      function scramble(el) {
+        el.classList.add("in");                 /* fade in regardless */
+        if (reduce) return;                      /* no glyph animation */
+        if (active.length >= MAX_ACTIVE) return; /* busy — text already shows */
+        startOne(el);
+        if (!driverRunning) {
+          driverRunning = true;
+          requestAnimationFrame(drive);
+        }
+      }
+
+      var els = document.querySelectorAll(".reveal");
+      if (!("IntersectionObserver" in window)) {
+        els.forEach(function (e) {
+          e.classList.add("in");
+          /* restore originals untouched */
+        });
+        return;
+      }
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (en) {
+          if (en.isIntersecting) {
+            scramble(en.target);
+            io.unobserve(en.target);
+          }
+        });
+      }, { threshold: 0.12, rootMargin: "0px 0px -6% 0px" });
+      els.forEach(function (e) { io.observe(e); });
+    })();
+
+    /* Click-to-copy rows (Discord username) ---------------------- */
+    (function () {
+      var rows = document.querySelectorAll("[data-copy]");
+      function showToast(x, y, msg) {
+        var t = document.createElement("div");
+        t.className = "copy-toast";
+        t.textContent = msg;
+        t.style.left = x + "px";
+        t.style.top  = y + "px";
+        document.body.appendChild(t);
+        requestAnimationFrame(function () { t.classList.add("show"); });
+        setTimeout(function () {
+          t.classList.remove("show");
+          setTimeout(function () { t.remove(); }, 300);
+        }, 1100);
+      }
+      rows.forEach(function (row) {
+        row.addEventListener("click", function (ev) {
+          ev.preventDefault();
+          var text = row.getAttribute("data-copy");
+          var msg  = row.getAttribute("data-copy-msg") || "Copied";
+          var x = ev.clientX, y = ev.clientY;
+          var fire = function () { showToast(x, y, msg); };
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(fire, fire);
+          } else {
+            var ta = document.createElement("textarea");
+            ta.value = text;
+            document.body.appendChild(ta);
+            ta.select();
+            try { document.execCommand("copy"); } catch (e) {}
+            document.body.removeChild(ta);
+            fire();
+          }
+        });
+      });
+    })();
+
+    /* Fast-flick wave across the project cards ------------------- */
+    (function () {
+      var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (reduce) return;
+      var cards = Array.prototype.slice.call(document.querySelectorAll("a.proj"));
+      if (!cards.length) return;
+
+      /* Track scroll velocity (px/ms, smoothed) and direction. A relaxed
+         scroll is ~0.1–0.4; a hard flick is well above 2. */
+      var lastY = window.pageYOffset;
+      var lastT = performance.now();
+      var speed = 0;
+      var dir = 1;              /* +1 = scrolling down, -1 = up */
+      var wasFast = false;      /* rising-edge latch: one wave per flick */
+      var FAST = 3.5;           /* px/ms threshold to fire the wave */
+      var STAGGER = 70;         /* ms between each card in the ripple */
+
+      var armed = false;        /* ignore the load-time scroll settling */
+      setTimeout(function () { armed = true; }, 400);
+
+      window.addEventListener("scroll", function () {
+        var now = performance.now();
+        var y = window.pageYOffset;
+        var dt = now - lastT;
+        if (dt > 0) {
+          var dy = y - lastY;
+          speed = speed * 0.6 + (Math.abs(dy) / dt) * 0.4;
+          if (dy !== 0) dir = dy > 0 ? 1 : -1;
+        }
+        lastY = y; lastT = now;
+
+        /* fire once when the flick first crosses the threshold; re-arm
+           only after the scroll has clearly slowed back down */
+        if (armed && !wasFast && speed > FAST) {
+          wasFast = true;
+          triggerWave(dir);
+        } else if (speed < FAST * 0.5) {
+          wasFast = false;
+        }
+      }, { passive: true });
+
+      function pop(el) {
+        if (el._popping) return;
+        el._popping = true;
+        el.classList.add("pop");
+        el.addEventListener("animationend", function handler() {
+          el.classList.remove("pop");
+          el._popping = false;
+          el.removeEventListener("animationend", handler);
+        });
+      }
+
+      function triggerWave(direction) {
+        var vh = window.innerHeight, center = vh / 2;
+
+        /* start card = the one nearest screen-center that's actually on
+           screen. If none, the user isn't looking at the projects → no wave. */
+        var startIdx = -1, best = Infinity;
+        for (var i = 0; i < cards.length; i++) {
+          var r = cards[i].getBoundingClientRect();
+          if (r.bottom < 0 || r.top > vh) continue;          /* off screen */
+          var d = Math.abs((r.top + r.height / 2) - center);
+          if (d < best) { best = d; startIdx = i; }
+        }
+        if (startIdx === -1) return;
+
+        /* ripple from the start card outward in the scroll direction,
+           each card delayed a little more than the last */
+        var step = 0;
+        if (direction > 0) {
+          for (var j = startIdx; j < cards.length; j++) schedulePop(cards[j], step++);
+        } else {
+          for (var k = startIdx; k >= 0; k--) schedulePop(cards[k], step++);
+        }
+      }
+
+      function schedulePop(el, order) {
+        setTimeout(function () { pop(el); }, order * STAGGER);
+      }
+    })();
+  </script>
+</body>
+</html>
